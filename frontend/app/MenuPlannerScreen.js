@@ -1,8 +1,9 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import {
     FlatList, View, Text, TouchableOpacity, TextInput,
-    ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet
+    ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, Alert
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Octicons from '@expo/vector-icons/Octicons';
@@ -25,6 +26,10 @@ const EXAMPLE_PROMPTS = [
 
 const GREETING = "Hi! I'm your Menu & Event Planner 🍽️\n\nTell me about your event — cuisine, number of guests, occasion, dietary needs — and I'll suggest a full menu, ingredients, estimated cost, and matching chefs near you.";
 
+const GREETING_MESSAGE = { id: 'greeting', role: 'assistant', content: GREETING };
+
+const conversationStorageKey = (userId) => `menu_planner_conversation_${userId}`;
+
 async function postPlannerChat({ apiUrl, token, conversationId, message }) {
     const res = await fetch(`${apiUrl}/api/v1/menu-planner/chat`, {
         method: 'POST',
@@ -38,24 +43,74 @@ async function postPlannerChat({ apiUrl, token, conversationId, message }) {
 
 export default function MenuPlannerScreen() {
     const { apiUrl } = getEnvVars();
-    const { token, logout } = useAuth();
+    const { token, userId, logout } = useAuth();
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const flatListRef = useRef();
 
     const [conversationId, setConversationId] = useState(null);
-    const [messages, setMessages] = useState([
-        { id: 'greeting', role: 'assistant', content: GREETING },
-    ]);
+    const [messages, setMessages] = useState([GREETING_MESSAGE]);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     const [error, setError] = useState(null);
+    const [historyLoaded, setHistoryLoaded] = useState(false);
+
+    // Restore the last saved conversation for this user on mount, so leaving
+    // and re-entering the screen doesn't wipe the chat.
+    useEffect(() => {
+        if (!userId) { setHistoryLoaded(true); return; }
+        (async () => {
+            try {
+                const saved = await AsyncStorage.getItem(conversationStorageKey(userId));
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.messages?.length) setMessages(parsed.messages);
+                    if (parsed.conversationId) setConversationId(parsed.conversationId);
+                }
+            } catch (e) {
+                console.error('Failed to load saved conversation:', e);
+            } finally {
+                setHistoryLoaded(true);
+            }
+        })();
+    }, [userId]);
+
+    // Persist on every change, once the initial load has finished (so we
+    // don't clobber the saved conversation with the default greeting first).
+    useEffect(() => {
+        if (!historyLoaded || !userId) return;
+        AsyncStorage.setItem(
+            conversationStorageKey(userId),
+            JSON.stringify({ conversationId, messages })
+        ).catch(e => console.error('Failed to save conversation:', e));
+    }, [historyLoaded, userId, conversationId, messages]);
 
     useLayoutEffect(() => {
         if (flatListRef.current && messages.length > 0) {
             flatListRef.current.scrollToEnd({ animated: false });
         }
     }, [messages]);
+
+    const startNewChat = () => {
+        Alert.alert(
+            'Start a new chat?',
+            'This clears your current conversation. It cannot be undone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Start New',
+                    style: 'destructive',
+                    onPress: () => {
+                        setMessages([GREETING_MESSAGE]);
+                        setConversationId(null);
+                        setError(null);
+                        setInput('');
+                        if (userId) AsyncStorage.removeItem(conversationStorageKey(userId)).catch(() => {});
+                    },
+                },
+            ]
+        );
+    };
 
     const sendMessage = async (text) => {
         const trimmed = (text || input).trim();
@@ -170,7 +225,9 @@ export default function MenuPlannerScreen() {
                         <Text style={s.headerTitle}>Event Planner</Text>
                         <Text style={s.headerSub}>AI-powered menu suggestions</Text>
                     </View>
-                    <View style={{ width: 40 }} />
+                    <TouchableOpacity onPress={startNewChat} style={s.newChatBtn}>
+                        <Octicons name="plus" size={20} color={GREEN} />
+                    </TouchableOpacity>
                 </View>
 
                 <KeyboardAvoidingView
@@ -258,6 +315,10 @@ const s = StyleSheet.create({
         backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: BORDER,
     },
     backBtn: {
+        width: 40, height: 40, borderRadius: 20,
+        backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center',
+    },
+    newChatBtn: {
         width: 40, height: 40, borderRadius: 20,
         backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center',
     },

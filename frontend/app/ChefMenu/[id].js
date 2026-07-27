@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useLocalSearchParams, Stack, useRouter, useFocusEffect } from 'expo-router';
-import { ScrollView, Text, Alert, View, Modal, Image, TouchableOpacity, StyleSheet, TextInput } from "react-native";
-import { Octicons } from '@expo/vector-icons';
+import { ScrollView, Text, Alert, View, Modal, Image, TouchableOpacity, StyleSheet, TextInput, Pressable } from "react-native";
+import { Octicons, Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import getEnvVars from "../../config";
 import { useAuth } from "../context/AuthContext";
+import { useCart } from "../context/CartContext";
 import LoadingIcon from "../components/LoadingIcon";
 import ProfilePicture from "../components/ProfilePicture";
 import RatingsDisplay from '../components/RatingsDisplay';
@@ -60,6 +61,19 @@ const getDefaultBookingDate = () => {
     return { month: tomorrow.getMonth(), day: tomorrow.getDate(), year: tomorrow.getFullYear(), hour: 12, minute: 0 };
 };
 
+const formatBookingDate = (bookingDate, bookingTime) => {
+    if (!bookingDate) return 'Recent booking';
+    const date = new Date(bookingDate);
+    const datePart = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const timePart = bookingTime ? new Date(`2000-01-01T${bookingTime}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+    return timePart ? `${datePart} · ${timePart}` : datePart;
+};
+
+const formatRecentStatus = (status) => {
+    const value = String(status || 'completed').toLowerCase();
+    return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
 // ── Stepper ───────────────────────────────────────────────────────────────────
 const Stepper = ({ label, value, onDecrement, onIncrement }) => (
     <View style={{ alignItems: 'center', flex: 1 }}>
@@ -77,13 +91,20 @@ const Stepper = ({ label, value, onDecrement, onIncrement }) => (
 );
 
 // ── Menu item card ────────────────────────────────────────────────────────────
-const MenuItemCard = ({ item, onAddToOrder, apiUrl, userType }) => {
+const MenuItemCard = ({ item, onAddToOrder, onQtyDec, onQtyInc, apiUrl, userType, quantity = 0 }) => {
     const imgSrc  = getImageSource(item?.photo_url, apiUrl);
     const canOrder = userType !== 'chef' && item?.is_available;
     const section  = getSectionForItem(item);
+    const isSelected = quantity > 0;
 
     return (
-        <View style={st.menuCard}>
+        <View style={[st.menuCard, isSelected && st.menuCardSelected]}>
+            {isSelected ? (
+                <View style={st.selectedBadge}>
+                    <Octicons name="check" size={11} color={GREEN} />
+                    <Text style={st.selectedBadgeTxt}>{quantity} selected</Text>
+                </View>
+            ) : null}
             <Text style={st.menuItemName}>{item?.dish_name || 'Dish Name'}</Text>
             {section ? (
                 <View style={[st.mealBadge, { backgroundColor: section.color }]}>
@@ -112,22 +133,36 @@ const MenuItemCard = ({ item, onAddToOrder, apiUrl, userType }) => {
                 {item?.prep_time != null ? <Text style={st.menuItemFooterMeta}>{'Prep: ' + item.prep_time + ' min'}</Text> : null}
                 {item?.price     != null ? <Text style={st.menuItemPrice}>{'$' + Number(item.price).toFixed(2)}</Text>     : null}
             </View>
-            <TouchableOpacity
-                style={[st.addBtn, !canOrder && st.addBtnDisabled]}
-                onPress={() => canOrder && onAddToOrder?.(item)}
-                disabled={!canOrder}
-                activeOpacity={0.85}
-            >
-                <Text style={[st.addBtnTxt, !canOrder && st.addBtnTxtDisabled]}>
-                    {item?.is_available ? 'Add to order' : 'Not available'}
-                </Text>
-            </TouchableOpacity>
+            {isSelected ? (
+                <View style={st.itemActionRow}>
+                    <TouchableOpacity style={st.qtyBtn} onPress={() => onQtyDec?.(item)} activeOpacity={0.7}>
+                        <Text style={st.qtyBtnTxt}>−</Text>
+                    </TouchableOpacity>
+                    <View style={st.qtyPill}>
+                        <Text style={st.qtyPillTxt}>{quantity}</Text>
+                    </View>
+                    <TouchableOpacity style={st.qtyBtn} onPress={() => onQtyInc?.(item)} activeOpacity={0.7}>
+                        <Text style={st.qtyBtnTxt}>+</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <TouchableOpacity
+                    style={[st.addBtn, !canOrder && st.addBtnDisabled]}
+                    onPress={() => canOrder && onAddToOrder?.(item)}
+                    disabled={!canOrder}
+                    activeOpacity={0.85}
+                >
+                    <Text style={[st.addBtnTxt, !canOrder && st.addBtnTxtDisabled]}>
+                        {item?.is_available ? 'Add' : 'Not available'}
+                    </Text>
+                </TouchableOpacity>
+            )}
         </View>
     );
 };
 
 // ── Collapsible section card ──────────────────────────────────────────────────
-const SectionCard = ({ section, items, onAddToOrder, apiUrl, userType, defaultExpanded = true }) => {
+const SectionCard = ({ section, items, onAddToOrder, onQtyDec, onQtyInc, orderItems, apiUrl, userType, defaultExpanded = true }) => {
     const [expanded, setExpanded] = useState(defaultExpanded);
     if (!items.length) return null;
 
@@ -154,7 +189,16 @@ const SectionCard = ({ section, items, onAddToOrder, apiUrl, userType, defaultEx
             {expanded ? (
                 <View style={st.sectionBody}>
                     {items.map(item => (
-                        <MenuItemCard key={item.id} item={item} onAddToOrder={onAddToOrder} apiUrl={apiUrl} userType={userType} />
+                        <MenuItemCard
+                            key={item.id}
+                            item={item}
+                            onAddToOrder={onAddToOrder}
+                            onQtyDec={onQtyDec}
+                            onQtyInc={onQtyInc}
+                            apiUrl={apiUrl}
+                            userType={userType}
+                            quantity={orderItems.find(o => o.id === item.id)?.quantity || 0}
+                        />
                     ))}
                 </View>
             ) : null}
@@ -168,6 +212,14 @@ export default function ChefMenu() {
     const router  = useRouter();
     const insets  = useSafeAreaInsets();
     const { token, userId, profileId, userType, sessionId } = useAuth();
+    const {
+        cartReady,
+        activeChefId,
+        orderItems,
+        setActiveChefId,
+        updateOrderItems,
+        clearActiveCart,
+    } = useCart();
 
     const startTimeRef = useRef(null);
 
@@ -200,8 +252,11 @@ export default function ChefMenu() {
     const [menuItems,    setMenuItems]    = useState([]);
     const [featuredItems,setFeaturedItems]= useState([]);
     const [loading,      setLoading]      = useState(true);
-    const [orderItems,   setOrderItems]   = useState([]);
     const [showOrderModal, setShowOrderModal] = useState(false);
+    const [showCartDrawer, setShowCartDrawer] = useState(false);
+    const [drawerTab, setDrawerTab] = useState('draft');
+    const [recentOrders, setRecentOrders] = useState([]);
+    const [recentOrdersLoading, setRecentOrdersLoading] = useState(false);
 
     const defaults = getDefaultBookingDate();
     const [selectedMonth,  setSelectedMonth]  = useState(defaults.month);
@@ -281,6 +336,15 @@ export default function ChefMenu() {
         fetchData();
     }, [id, apiUrl, token]);
 
+    useEffect(() => {
+        if (!id) return;
+        setActiveChefId(String(id));
+
+        return () => {
+            setActiveChefId(null);
+        };
+    }, [id, setActiveChefId]);
+
     const itemsBySection = useMemo(() => {
         const grouped = {};
         FIXED_SECTIONS.forEach(sec => { grouped[sec.id] = []; });
@@ -304,18 +368,54 @@ export default function ChefMenu() {
             sessionId: sessionId,
             eventData: { dish_name: item.dish_name, price: item.price, chef_id: id }
         });
-        const existing = orderItems.find(o => o.id === item.id);
-        if (existing) setOrderItems(orderItems.map(o => o.id === item.id ? { ...o, quantity: o.quantity + 1 } : o));
-        else          setOrderItems([...orderItems, { ...item, quantity: 1 }]);
+        updateOrderItems((currentItems) => {
+            const existing = currentItems.find((o) => o.id === item.id);
+            if (existing) return currentItems.map((o) => o.id === item.id ? { ...o, quantity: o.quantity + 1 } : o);
+            return [...currentItems, { ...item, quantity: 1 }];
+        });
     };
 
     const handleQtyDec = (item) => {
-        if (item.quantity > 1) setOrderItems(orderItems.map(o => o.id === item.id ? { ...o, quantity: o.quantity - 1 } : o));
-        else                   setOrderItems(orderItems.filter(o => o.id !== item.id));
+        updateOrderItems((currentItems) => {
+            const current = currentItems.find((o) => o.id === item.id);
+            if (!current) return currentItems;
+            if (current.quantity > 1) {
+                return currentItems.map((o) => o.id === item.id ? { ...o, quantity: o.quantity - 1 } : o);
+            }
+            return currentItems.filter((o) => o.id !== item.id);
+        });
     };
     const handleQtyInc = (item) => {
-        setOrderItems(orderItems.map(o => o.id === item.id ? { ...o, quantity: o.quantity + 1 } : o));
+        updateOrderItems((currentItems) => currentItems.map((o) => o.id === item.id ? { ...o, quantity: o.quantity + 1 } : o));
     };
+
+    const fetchRecentOrders = useCallback(async () => {
+        if (!profileId || userType !== 'customer') return;
+        setRecentOrdersLoading(true);
+        try {
+            const res = await fetch(`${apiUrl}/booking/customer/${profileId}/dashboard`, {
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (res.ok) {
+                const dashboard = data.data || {};
+                const combined = [
+                    ...(dashboard.upcoming_bookings || []),
+                    ...(dashboard.todays_bookings || []),
+                    ...(dashboard.previous_bookings || []),
+                ].sort((a, b) => {
+                    const aDate = new Date(`${a.booking_date || '1970-01-01'}T${a.booking_time || '00:00:00'}`);
+                    const bDate = new Date(`${b.booking_date || '1970-01-01'}T${b.booking_time || '00:00:00'}`);
+                    return bDate - aDate;
+                });
+                setRecentOrders(combined);
+            }
+        } catch {
+            setRecentOrders([]);
+        } finally {
+            setRecentOrdersLoading(false);
+        }
+    }, [apiUrl, profileId, token, userType]);
 
     const fetchPaymentMethods = async () => {
         const uid = userId || profileId;
@@ -333,6 +433,9 @@ export default function ChefMenu() {
     };
 
     useEffect(() => { if (showOrderModal && userType === 'customer') fetchPaymentMethods(); }, [showOrderModal]);
+    useEffect(() => {
+        if (showCartDrawer && userType === 'customer') fetchRecentOrders();
+    }, [showCartDrawer, userType, fetchRecentOrders]);
     useEffect(() => { if (chefData?.public_location) setEventZip(parseZipFromLocation(chefData.public_location)); }, [chefData?.public_location]);
 
     const mealConflicts = useMemo(() => {
@@ -438,7 +541,7 @@ export default function ChefMenu() {
 
             Alert.alert('Booking Confirmed! 🎉',
                 'Booking #' + bookResult.booking_id + '\nAmount: $' + payableTotal.toFixed(2) + '\nCard: ' + card?.brand?.toUpperCase() + ' •••• ' + card?.last4 + '\nDate: ' + selected.toLocaleString('en-US'),
-                [{ text: 'OK', onPress: () => { setOrderItems([]); setSelectedPaymentMethod(null); } }]
+                [{ text: 'OK', onPress: () => { clearActiveCart(); setSelectedPaymentMethod(null); } }]
             );
         } catch { Alert.alert('Error', 'Network error.'); setPaymentProcessing(false); }
     };
@@ -448,8 +551,9 @@ export default function ChefMenu() {
     const quoteMult     = Number(pricingQuote?.multiplier  || 1);
     const rushFee       = Math.max(0, quoteFinal - orderTotal);
     const formattedDT   = MONTHS_SHORT[selectedMonth] + ' ' + String(selectedDay).padStart(2,'0') + ', ' + selectedYear + '  ' + String(selectedHour).padStart(2,'0') + ':' + String(selectedMinute).padStart(2,'00');
+    const selectedItemCount = orderItems.reduce((sum, item) => sum + item.quantity, 0);
 
-    if (loading) {
+    if (loading || !cartReady) {
         return (
             <>
                 <Stack.Screen options={{ headerShown: false }} />
@@ -463,7 +567,28 @@ export default function ChefMenu() {
     return (
         <>
             <Stack.Screen options={{ headerShown: false, contentStyle: { backgroundColor: BG } }} />
-            <ScrollView style={st.screen} contentContainerStyle={{ paddingTop: insets.top + 10, padding: 20, paddingBottom: 40 }}>
+            <View style={st.screen}>
+            <ScrollView style={st.screen} contentContainerStyle={{ paddingTop: insets.top + 10, padding: 20, paddingBottom: orderItems.length > 0 ? 170 : 40 }}>
+
+                <View style={st.topNavRow}>
+                    <TouchableOpacity style={st.backPill} onPress={() => router.back()} activeOpacity={0.85}>
+                        <Octicons name="chevron-left" size={18} color={GREEN} />
+                        <Text style={st.backPillTxt}>Back</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={st.cartBtn} onPress={() => setShowCartDrawer(true)} activeOpacity={0.85}>
+                        <Feather name="shopping-bag" size={18} color={GREEN} />
+                        {selectedItemCount > 0 ? (
+                            <View style={st.cartBadge}>
+                                <Text style={st.cartBadgeTxt}>{selectedItemCount}</Text>
+                            </View>
+                        ) : null}
+                    </TouchableOpacity>
+                </View>
+
+                <View style={st.titleBlock}>
+                    <Text style={st.menuTitle}>Chef's Specialty Menu</Text>
+                    <Text style={st.menuSubtitle}>Select dishes, adjust quantities, then review your booking.</Text>
+                </View>
 
                 {/* Chef header */}
                 <View style={st.chefHeader}>
@@ -506,7 +631,7 @@ export default function ChefMenu() {
                         </TouchableOpacity>
                         <View style={st.sectionBody}>
                             {featuredItems.map(item => (
-                                <MenuItemCard key={item.id} item={item} onAddToOrder={handleAddToOrder} apiUrl={apiUrl} userType={userType} />
+                                <MenuItemCard key={item.id} item={item} onAddToOrder={handleAddToOrder} onQtyDec={handleQtyDec} onQtyInc={handleQtyInc} apiUrl={apiUrl} userType={userType} quantity={orderItems.find(o => o.id === item.id)?.quantity || 0} />
                             ))}
                         </View>
                     </View>
@@ -519,6 +644,9 @@ export default function ChefMenu() {
                         section={section}
                         items={itemsBySection[section.id] || []}
                         onAddToOrder={handleAddToOrder}
+                        onQtyDec={handleQtyDec}
+                        onQtyInc={handleQtyInc}
+                        orderItems={orderItems}
                         apiUrl={apiUrl}
                         userType={userType}
                         defaultExpanded={idx === 0}
@@ -531,59 +659,14 @@ export default function ChefMenu() {
                         section={{ id: 'other', label: 'Other Dishes', subtitle: 'Various', color: '#f8faf8', textColor: TEXT_MID }}
                         items={itemsBySection['other']}
                         onAddToOrder={handleAddToOrder}
+                        onQtyDec={handleQtyDec}
+                        onQtyInc={handleQtyInc}
+                        orderItems={orderItems}
                         apiUrl={apiUrl}
                         userType={userType}
                         defaultExpanded={false}
                     />
                 ) : null}
-
-                {menuItems.length === 0 ? (
-                    <View style={st.emptyCard}>
-                        <Text style={st.emptyTxt}>No menu items available yet</Text>
-                    </View>
-                ) : null}
-
-                {/* Order summary */}
-                {orderItems.length > 0 ? (
-                    <View style={[st.sectionCard, { borderColor: GREEN, borderWidth: 2 }]}>
-                        <View style={[st.sectionHeader, { backgroundColor: GREEN_LIGHT }]}>
-                            <Text style={[st.sectionTitle, { color: GREEN }]}>
-                                {'My Selection (' + orderItems.length + ' ' + (orderItems.length === 1 ? 'item' : 'items') + ')'}
-                            </Text>
-                        </View>
-                        <View style={st.sectionBody}>
-                            {orderItems.map((item, idx) => (
-                                <View key={idx} style={st.orderRow}>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={st.orderItemName}>{item.dish_name}</Text>
-                                        <Text style={st.orderItemMeta}>{'$' + Number(item.price).toFixed(2) + ' × ' + item.quantity}</Text>
-                                    </View>
-                                    <View style={st.qtyRow}>
-                                        <TouchableOpacity style={st.qtyBtn} onPress={() => handleQtyDec(item)} activeOpacity={0.7}>
-                                            <Text style={st.qtyBtnTxt}>−</Text>
-                                        </TouchableOpacity>
-                                        <Text style={st.qtyTxt}>{item.quantity}</Text>
-                                        <TouchableOpacity style={st.qtyBtn} onPress={() => handleQtyInc(item)} activeOpacity={0.7}>
-                                            <Text style={st.qtyBtnTxt}>+</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                    <Text style={st.orderItemTotal}>{'$' + (item.price * item.quantity).toFixed(2)}</Text>
-                                </View>
-                            ))}
-                            <View style={st.orderTotalRow}>
-                                <Text style={st.orderTotalLabel}>Total:</Text>
-                                <Text style={st.orderTotalAmt}>{'$' + orderTotal.toFixed(2)}</Text>
-                            </View>
-                            <TouchableOpacity style={st.placeOrderBtn} onPress={() => setShowOrderModal(true)} activeOpacity={0.85}>
-                                <Text style={st.placeOrderBtnTxt}>Place Booking</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                ) : null}
-
-                <TouchableOpacity style={[st.returnBtn, { marginTop: 8 }]} onPress={() => router.back()} activeOpacity={0.85}>
-                    <Text style={st.returnBtnTxt}>← Return</Text>
-                </TouchableOpacity>
 
                 {/* ── Booking modal ── */}
                 <Modal visible={showOrderModal} transparent animationType="slide" onRequestClose={() => setShowOrderModal(false)}>
@@ -709,6 +792,96 @@ export default function ChefMenu() {
                     </View>
                 </Modal>
             </ScrollView>
+            {orderItems.length > 0 ? (
+                <View style={[st.stickyBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+                    <View>
+                        <Text style={st.stickyBarTitle}>{selectedItemCount} item{selectedItemCount !== 1 ? 's' : ''} selected</Text>
+                        <Text style={st.stickyBarSub}>{'$' + orderTotal.toFixed(2)} estimated subtotal</Text>
+                    </View>
+                    <TouchableOpacity style={st.reviewBtn} onPress={() => setShowOrderModal(true)} activeOpacity={0.85}>
+                        <Text style={st.reviewBtnTxt}>Proceed to Checkout</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : null}
+
+            <Modal visible={showCartDrawer} transparent animationType="fade" onRequestClose={() => setShowCartDrawer(false)}>
+                <View style={st.drawerOverlay}>
+                    <Pressable style={st.drawerBackdrop} onPress={() => setShowCartDrawer(false)} />
+                    <View style={st.drawerCard}>
+                        <View style={st.drawerHandle} />
+                        <View style={st.drawerHeader}>
+                            <Text style={st.drawerTitle}>Cart & Orders</Text>
+                            <TouchableOpacity onPress={() => setShowCartDrawer(false)} style={st.modalCloseBtn}>
+                                <Octicons name="x" size={18} color={GREEN} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={st.drawerTabs}>
+                            {[
+                                { key: 'draft', label: 'Current Items' },
+                                { key: 'recent', label: 'Recent Orders' },
+                            ].map(tab => (
+                                <TouchableOpacity key={tab.key} onPress={() => setDrawerTab(tab.key)} style={[st.drawerTab, drawerTab === tab.key && st.drawerTabActive]}>
+                                    <Text style={[st.drawerTabTxt, drawerTab === tab.key && st.drawerTabTxtActive]}>{tab.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+
+                        {drawerTab === 'draft' ? (
+                            <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }}>
+                                {orderItems.length > 0 ? orderItems.map((item) => (
+                                    <View key={item.id} style={st.drawerItemRow}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={st.drawerItemTitle}>{item.dish_name}</Text>
+                                            <Text style={st.drawerItemMeta}>{'$' + Number(item.price).toFixed(2)} each</Text>
+                                        </View>
+                                        <View style={st.drawerQtyControls}>
+                                            <TouchableOpacity style={st.qtyBtn} onPress={() => handleQtyDec(item)} activeOpacity={0.7}><Text style={st.qtyBtnTxt}>−</Text></TouchableOpacity>
+                                            <View style={st.qtyPill}><Text style={st.qtyPillTxt}>{item.quantity}</Text></View>
+                                            <TouchableOpacity style={st.qtyBtn} onPress={() => handleQtyInc(item)} activeOpacity={0.7}><Text style={st.qtyBtnTxt}>+</Text></TouchableOpacity>
+                                        </View>
+                                    </View>
+                                )) : (
+                                    <View style={st.emptyDraftCard}>
+                                        <Text style={st.emptyTxt}>Your cart is empty.</Text>
+                                    </View>
+                                )}
+
+                                <View style={st.summaryCard}>
+                                    <View style={st.summaryRow}><Text style={st.summaryLabel}>Selected items</Text><Text style={st.summaryValue}>{selectedItemCount}</Text></View>
+                                    <View style={st.summaryRow}><Text style={st.summaryLabel}>Subtotal</Text><Text style={st.summaryValue}>{'$' + orderTotal.toFixed(2)}</Text></View>
+                                    <View style={st.summaryRow}><Text style={st.summaryLabel}>Estimated total</Text><Text style={[st.summaryValue, { color: GREEN }]}>{'$' + quoteFinal.toFixed(2)}</Text></View>
+                                </View>
+
+                                <TouchableOpacity style={st.reviewBtn} onPress={() => { setShowCartDrawer(false); setShowOrderModal(true); }} activeOpacity={0.85}>
+                                    <Text style={st.reviewBtnTxt}>Proceed to Checkout</Text>
+                                </TouchableOpacity>
+                            </ScrollView>
+                        ) : (
+                            <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }}>
+                                {recentOrdersLoading ? (
+                                    <View style={st.emptyDraftCard}><Text style={st.emptyTxt}>Loading recent orders...</Text></View>
+                                ) : recentOrders.length > 0 ? recentOrders.map((order) => (
+                                    <View key={order.booking_id} style={st.recentOrderCard}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={st.drawerItemTitle}>{'Order #' + order.booking_id}</Text>
+                                            <Text style={st.drawerItemMeta}>{order.chef_name || (chefData?.first_name || '') + ' ' + (chefData?.last_name || '')}</Text>
+                                            <Text style={st.drawerItemMeta}>{formatBookingDate(order.booking_date, order.booking_time)}</Text>
+                                        </View>
+                                        <View style={st.statusPill}><Text style={st.statusPillTxt}>{formatRecentStatus(order.status || 'completed')}</Text></View>
+                                    </View>
+                                )) : (
+                                    <View style={st.emptyDraftCard}><Text style={st.emptyTxt}>No recent orders found.</Text></View>
+                                )}
+                                <TouchableOpacity style={st.secondaryLinkBtn} onPress={() => { setShowCartDrawer(false); router.push('/(tabs)/BookingsScreen'); }} activeOpacity={0.85}>
+                                    <Text style={st.secondaryLinkTxt}>Open Bookings</Text>
+                                </TouchableOpacity>
+                            </ScrollView>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+            </View>
         </>
     );
 }
@@ -732,6 +905,9 @@ const st = StyleSheet.create({
     sectionCountTxt:  { fontSize: 12, fontWeight: '700' },
     sectionBody:      { padding: 12 },
     menuCard:         { backgroundColor: '#f8faf8', borderRadius: 12, borderWidth: 1, borderColor: BORDER, marginBottom: 10, padding: 12 },
+    menuCardSelected: { borderColor: GREEN, backgroundColor: '#f3fbf5', shadowColor: GREEN, shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+    selectedBadge:    { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: GREEN_LIGHT, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8 },
+    selectedBadgeTxt: { fontSize: 11, fontWeight: '700', color: GREEN },
     menuItemName:     { fontSize: 15, fontWeight: '700', color: TEXT, textAlign: 'center', paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: BORDER, marginBottom: 8 },
     mealBadge:        { alignSelf: 'center', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20, marginBottom: 8 },
     mealBadgeTxt:     { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
@@ -748,6 +924,7 @@ const st = StyleSheet.create({
     addBtnDisabled:   { backgroundColor: '#e2ece2' },
     addBtnTxt:        { color: '#fff', fontWeight: '700', fontSize: 14 },
     addBtnTxtDisabled:{ color: TEXT_SOFT },
+    itemActionRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
     emptyCard:        { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: BORDER, padding: 32, alignItems: 'center' },
     emptyTxt:         { fontSize: 14, color: TEXT_SOFT },
     orderRow:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER },
@@ -756,6 +933,8 @@ const st = StyleSheet.create({
     qtyRow:           { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 10 },
     qtyBtn:           { width: 34, height: 34, borderRadius: 17, backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
     qtyBtnTxt:        { fontSize: 20, fontWeight: '700', color: GREEN, lineHeight: 24 },
+    qtyPill:          { minWidth: 34, minHeight: 28, paddingHorizontal: 10, borderRadius: 999, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center' },
+    qtyPillTxt:       { fontSize: 14, fontWeight: '700', color: '#fff' },
     qtyTxt:           { fontSize: 16, fontWeight: '700', color: TEXT, minWidth: 22, textAlign: 'center' },
     orderItemTotal:   { fontSize: 14, fontWeight: '700', color: GREEN, minWidth: 52, textAlign: 'right' },
     orderTotalRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, marginTop: 4 },
@@ -765,6 +944,45 @@ const st = StyleSheet.create({
     placeOrderBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
     returnBtn:        { paddingVertical: 13, borderRadius: 12, alignItems: 'center', borderWidth: 1.5, borderColor: BORDER, backgroundColor: '#fff' },
     returnBtnTxt:     { color: TEXT_MID, fontWeight: '600', fontSize: 14 },
+    topNavRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+    backPill:         { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: BORDER, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+    backPillTxt:      { fontSize: 13, fontWeight: '700', color: GREEN },
+    cartBtn:          { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: BORDER, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, position: 'relative' },
+    cartBadge:        { position: 'absolute', top: -6, right: -6, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: '#ef4444', alignItems: 'center', justifyContent: 'center' },
+    cartBadgeTxt:     { fontSize: 11, color: '#fff', fontWeight: '800' },
+    titleBlock:       { marginBottom: 12 },
+    menuTitle:        { fontSize: 20, fontWeight: '900', color: TEXT, letterSpacing: -0.4 },
+    menuSubtitle:     { fontSize: 13, color: TEXT_SOFT, marginTop: 4 },
+    stickyBar:        { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: BORDER, paddingHorizontal: 16, paddingTop: 12, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: -2 }, elevation: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    stickyBarTitle:   { fontSize: 14, fontWeight: '800', color: TEXT },
+    stickyBarSub:     { fontSize: 12, color: TEXT_SOFT, marginTop: 2 },
+    reviewBtn:        { backgroundColor: GREEN, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', shadowColor: GREEN, shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+    reviewBtnTxt:     { color: '#fff', fontWeight: '800', fontSize: 14 },
+    drawerOverlay:    { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+    drawerBackdrop:   { ...StyleSheet.absoluteFillObject },
+    drawerCard:       { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingBottom: 16, maxHeight: '85%' },
+    drawerHandle:     { width: 48, height: 5, borderRadius: 999, backgroundColor: '#d1ddd1', alignSelf: 'center', marginTop: 8, marginBottom: 12 },
+    drawerHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+    drawerTitle:      { fontSize: 18, fontWeight: '900', color: TEXT },
+    drawerTabs:       { flexDirection: 'row', gap: 8, marginBottom: 12 },
+    drawerTab:        { flex: 1, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: BORDER, alignItems: 'center', backgroundColor: '#f8faf8' },
+    drawerTabActive:  { borderColor: GREEN, backgroundColor: GREEN_LIGHT },
+    drawerTabTxt:     { fontSize: 13, fontWeight: '700', color: TEXT_SOFT },
+    drawerTabTxtActive:{ color: GREEN },
+    drawerItemRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: BORDER, paddingVertical: 12 },
+    drawerItemTitle:  { fontSize: 14, fontWeight: '800', color: TEXT },
+    drawerItemMeta:   { fontSize: 12, color: TEXT_SOFT, marginTop: 2 },
+    drawerQtyControls:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
+    summaryCard:      { backgroundColor: '#f8faf8', borderRadius: 14, borderWidth: 1, borderColor: BORDER, padding: 12, marginTop: 12, marginBottom: 12 },
+    summaryRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 3 },
+    summaryLabel:     { fontSize: 13, color: TEXT_MID },
+    summaryValue:     { fontSize: 13, fontWeight: '800', color: TEXT },
+    recentOrderCard:  { flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: BORDER, paddingVertical: 12 },
+    statusPill:       { backgroundColor: GREEN_LIGHT, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, alignSelf: 'flex-start' },
+    statusPillTxt:    { fontSize: 11, fontWeight: '800', color: GREEN },
+    secondaryLinkBtn: { paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: BORDER, backgroundColor: '#fff', alignItems: 'center', marginTop: 12 },
+    secondaryLinkTxt: { color: GREEN, fontWeight: '800', fontSize: 14 },
+    emptyDraftCard:   { backgroundColor: '#f8faf8', borderRadius: 14, borderWidth: 1, borderColor: BORDER, padding: 18, alignItems: 'center' },
     modalOverlay:     { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
     modalCard:        { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '92%' },
     modalHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: BORDER },

@@ -18,6 +18,8 @@ cuisine: Jamaican, guests: 12, dietary: none, date: 2026-06-15
 
 Response (abbreviated):
 {
+  "status": "complete",
+  "clarifying_question": null,
   "event_summary": {"cuisine": "Jamaican", "guest_count": 12, "dietary_notes": []},
   "menu": [
     {"course": "appetizer", "dish": "Jerk Chicken Wings", "rationale": "Classic Jamaican starter that pairs well with rum punch.", "serves": 12},
@@ -42,6 +44,8 @@ cuisine: Italian, guests: 8, dietary: vegetarian, date: 2026-07-20
 
 Response (abbreviated):
 {
+  "status": "complete",
+  "clarifying_question": null,
   "event_summary": {"cuisine": "Italian", "guest_count": 8, "dietary_notes": ["vegetarian"]},
   "menu": [
     {"course": "appetizer", "dish": "Bruschetta al Pomodoro", "rationale": "Light tomato starter that opens the palate without meat.", "serves": 8},

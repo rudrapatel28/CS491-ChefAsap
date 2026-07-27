@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import getEnvVars from "../../config";
 import { useAuth } from '../context/AuthContext';
 import Octicons from '@expo/vector-icons/Octicons';
+import { Feather } from '@expo/vector-icons';
 import LoadingIcon from '../components/LoadingIcon';
 
 const FILTER_TABS = ['All', 'Unread', 'Chefs', 'Bookings'];
@@ -42,7 +43,7 @@ function getInitials(firstName, lastName) {
     const b = (lastName || '').trim();
     const i1 = a[0] || '';
     const i2 = b[0] || (a[1] || '');
-    return `${i1}${i2}`.toUpperCase() || '?';
+    return `${i1}${i2}`.toUpperCase();
 }
 
 export default function Messages() {
@@ -185,10 +186,10 @@ export default function Messages() {
                                     source={{ uri: url?.startsWith('data:') ? url : `${apiUrl}${url}` }}
                                     style={{ width: 52, height: 52 }}
                                 />
+                            ) : initials ? (
+                                <Feather name="shopping-bag" size={18} color={GREEN} />
                             ) : (
-                                <Text style={{ fontSize: 16, fontWeight: '700', color: initialsColor }}>
-                                    {initials}
-                                </Text>
+                                <Feather name="shopping-bag" size={18} color={GREEN} />
                             )}
                         </View>
                     </View>

@@ -386,13 +386,21 @@ def _to_ui_response(plan: dict, candidate_chefs: list[dict]) -> tuple[dict | Non
         raw = plan.get("raw_response") if isinstance(plan, dict) else None
         return None, raw or "I had trouble formatting that plan. Could you try rephrasing?"
 
+    status = plan.get("status")
     event_summary = plan.get("event_summary") or {}
     cuisine = (event_summary.get("cuisine") or "").strip()
 
-    if cuisine == "REQUEST_NOT_CULINARY":
+    if status == "not_culinary":
         return None, (
             "I can only help with culinary event planning. Tell me about your event — "
             "cuisine, guest count, and any dietary needs — and I'll suggest a menu."
+        )
+
+    if status == "needs_more_info":
+        question = (plan.get("clarifying_question") or "").strip()
+        return None, question or (
+            "Could you tell me a bit more — cuisine or style, guest count, and any "
+            "dietary needs? That'll help me put together a full menu."
         )
 
     # Group flat menu items by course → [{ course, dishes: [...] }]
@@ -429,6 +437,17 @@ def _to_ui_response(plan: dict, candidate_chefs: list[dict]) -> tuple[dict | Non
         "per_person": ce.get("per_person_usd") if ce.get("per_person_usd") is not None else ce.get("per_person"),
         "breakdown": ce.get("breakdown"),
     }
+
+    # Belt-and-suspenders: regardless of what status the model claimed, never
+    # let a vacuous plan (no dishes, no ingredients, no cost) reach the UI as
+    # if it were a real one. Catches prompt drift/regressions without relying
+    # on the model getting `status` right every time.
+    has_cost = bool(estimated_cost["total"]) or bool(estimated_cost["per_person"])
+    if not menu and not ingredients and not has_cost:
+        return None, (
+            "I don't have enough detail yet to put together a plan — could you tell "
+            "me the cuisine or style, guest count, and any dietary needs?"
+        )
 
     # Enrich the LLM's chef IDs with profile data so ChefSuggestionCard can render.
     chef_lookup = {c["chef_id"]: c for c in candidate_chefs}
@@ -547,7 +566,15 @@ def chat_turn(
         _persist_message(conn, conversation_id, "assistant", json.dumps(plan))
 
         # Persist the plan record on the first turn so it can later be booked.
-        if is_new and isinstance(plan, dict) and not plan.get("_parse_error"):
+        # Skip refusal/clarification turns — they have no real plan content and
+        # would just leave junk rows in event_plans.
+        skip_statuses = {"needs_more_info", "not_culinary"}
+        if (
+            is_new
+            and isinstance(plan, dict)
+            and not plan.get("_parse_error")
+            and plan.get("status") not in skip_statuses
+        ):
             try:
                 summary = plan.get("event_summary") or {}
                 _persist_plan(

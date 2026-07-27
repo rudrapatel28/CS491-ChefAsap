@@ -1,5 +1,6 @@
 import { Stack, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import CartProvider from './context/CartContext';
 import { View } from 'react-native';
 import LoadingIcon from './components/LoadingIcon';
 import ThemeProvider from './providers/ThemeProvider';
@@ -23,9 +24,11 @@ export default function RootLayout() {
         <SafeAreaProvider>
             <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
                 <AuthProvider>
-                    <ThemeProvider>
-                        <RootStack />
-                    </ThemeProvider>
+                    <CartProvider>
+                        <ThemeProvider>
+                            <RootStack />
+                        </ThemeProvider>
+                    </CartProvider>
                 </AuthProvider>
             </StripeProvider>
         </SafeAreaProvider>

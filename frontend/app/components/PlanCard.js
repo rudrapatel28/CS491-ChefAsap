@@ -1,7 +1,58 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Share } from 'react-native';
 import Octicons from '@expo/vector-icons/Octicons';
 import ChefSuggestionCard from './ChefSuggestionCard';
+
+function formatPlanForShare(plan) {
+    const { menu = [], ingredients = [], estimated_cost, chefs = [], notes } = plan;
+    const totalCost = estimated_cost?.total ?? estimated_cost?.amount ?? estimated_cost;
+    const lines = ['My ChefASAP Event Plan', ''];
+
+    if (menu.length > 0) {
+        lines.push('MENU');
+        menu.forEach(course => {
+            lines.push(`${course.course ?? course.name ?? course}:`);
+            (course.dishes || []).forEach(dish => {
+                lines.push(`  - ${dish.name ?? dish}`);
+            });
+        });
+        lines.push('');
+    }
+
+    if (ingredients.length > 0) {
+        lines.push('INGREDIENTS');
+        ingredients.forEach(item => {
+            const name = item.name ?? item;
+            lines.push(item.quantity ? `  - ${name} (${item.quantity})` : `  - ${name}`);
+        });
+        lines.push('');
+    }
+
+    if (totalCost != null) {
+        lines.push('ESTIMATED COST');
+        lines.push(`  Total: $${typeof totalCost === 'number' ? totalCost.toFixed(2) : totalCost}`);
+        if (estimated_cost?.per_person > 0) {
+            lines.push(`  Per person: $${Number(estimated_cost.per_person).toFixed(2)}`);
+        }
+        lines.push('');
+    }
+
+    if (chefs.length > 0) {
+        lines.push('RECOMMENDED CHEFS');
+        chefs.forEach(chef => {
+            const name = chef.full_name || [chef.first_name, chef.last_name].filter(Boolean).join(' ') || 'Chef';
+            lines.push(`  - ${name}`);
+        });
+        lines.push('');
+    }
+
+    if (notes) {
+        lines.push('NOTES');
+        lines.push(`  ${notes}`);
+    }
+
+    return lines.join('\n').trim();
+}
 
 const GREEN = '#2d6a4f';
 const GREEN_LIGHT = '#d8f3dc';
@@ -46,16 +97,29 @@ export default function PlanCard({ plan, conversationId }) {
 
     const { menu = [], ingredients = [], estimated_cost, chefs = [], notes } = plan;
 
-    const totalCost = estimated_cost?.total
-        ?? estimated_cost?.amount
-        ?? estimated_cost;
+    const totalCost = typeof estimated_cost === 'number'
+        ? estimated_cost
+        : (estimated_cost?.total ?? estimated_cost?.amount);
+
+    const handleShare = async () => {
+        try {
+            await Share.share({ message: formatPlanForShare(plan) });
+        } catch (e) {
+            console.error('Failed to share plan:', e);
+        }
+    };
 
     return (
         <View style={s.card}>
             {/* Card title */}
             <View style={s.cardHeader}>
-                <Octicons name="sparkle-fill" size={15} color={GREEN} />
-                <Text style={s.cardTitle}>Your Event Plan</Text>
+                <View style={s.cardHeaderLeft}>
+                    <Octicons name="sparkle-fill" size={15} color={GREEN} />
+                    <Text style={s.cardTitle}>Your Event Plan</Text>
+                </View>
+                <TouchableOpacity onPress={handleShare} style={s.shareBtn} activeOpacity={0.7}>
+                    <Octicons name="share" size={16} color={GREEN} />
+                </TouchableOpacity>
             </View>
 
             {/* ── Menu ── */}
@@ -116,7 +180,7 @@ export default function PlanCard({ plan, conversationId }) {
                         <Text style={s.costAmount}>
                             ${typeof totalCost === 'number' ? totalCost.toFixed(2) : totalCost}
                         </Text>
-                        {estimated_cost?.per_person && (
+                        {estimated_cost?.per_person > 0 && (
                             <Text style={s.costPer}>
                                 (${Number(estimated_cost.per_person).toFixed(2)} / person)
                             </Text>
@@ -169,12 +233,18 @@ const s = StyleSheet.create({
         elevation: 2,
     },
     cardHeader: {
-        flexDirection: 'row', alignItems: 'center', gap: 8,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         paddingHorizontal: 16, paddingVertical: 12,
         backgroundColor: GREEN_LIGHT,
         borderBottomWidth: 1, borderBottomColor: BORDER,
     },
+    cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     cardTitle: { fontSize: 15, fontWeight: '800', color: GREEN },
+    shareBtn: {
+        width: 28, height: 28, borderRadius: 14,
+        alignItems: 'center', justifyContent: 'center',
+        backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0',
+    },
 
     // Section
     section: { borderBottomWidth: 1, borderBottomColor: BORDER },
