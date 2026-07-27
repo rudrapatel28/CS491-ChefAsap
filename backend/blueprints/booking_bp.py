@@ -39,6 +39,7 @@ def create_booking():
         data = request.get_json()
         
         customer_id = data.get('customer_id')
+        guest_id = data.get('guest_id')
         cuisine_type = data.get('cuisine_type')
         meal_type = (data.get('meal_type') or '').strip().lower()
         event_type = data.get('event_type', 'dinner')
@@ -55,9 +56,25 @@ def create_booking():
         pricing_multiplier = data.get('pricing_multiplier')
         pricing_features = data.get('pricing_features')
         
-        if not all([customer_id, cuisine_type, meal_type, 
-                   booking_date, booking_time, number_of_people]):
+        if customer_id and guest_id:
+            return jsonify({'error': 'Use either customer_id or guest_id, not both'}), 400
+
+        if not (customer_id or guest_id):
+            return jsonify({'error': 'customer_id or guest_id is required'}), 400
+
+        if not all([cuisine_type, meal_type, booking_date, booking_time, number_of_people]):
             return jsonify({'error': 'Missing required fields'}), 400
+
+        if guest_id:
+            conn = get_db_connection()
+            cursor = get_cursor(conn, dictionary=True)
+            cursor.execute('SELECT id FROM guests WHERE id = %s', (guest_id,))
+            if not cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Guest not found'}), 404
+            cursor.close()
+            conn.close()
         
         booking_datetime = datetime.strptime(f"{booking_date} {booking_time}", "%Y-%m-%d %H:%M")
         if booking_datetime <= datetime.now():
@@ -69,15 +86,15 @@ def create_booking():
         # FIX: Update the SQL query to include the pricing columns
         cursor.execute('''
             INSERT INTO bookings (
-                customer_id, cuisine_type, meal_type, event_type, 
+                customer_id, guest_id, cuisine_type, meal_type, event_type, 
                 booking_date, booking_time, produce_supply, 
                 number_of_people, special_notes, 
                 base_price, dynamic_price, total_cost, pricing_multiplier, pricing_features
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
             RETURNING id
         ''', (
-            customer_id, cuisine_type, meal_type, event_type, 
+            customer_id, guest_id, cuisine_type, meal_type, event_type, 
             booking_date, booking_time, produce_supply, 
             number_of_people, special_notes,
             base_price, dynamic_price, total_cost, pricing_multiplier, json.dumps(pricing_features) if pricing_features else None # Convert pricing_features to JSON string if it's a dict or list
@@ -94,6 +111,73 @@ def create_booking():
             'booking_id': booking_id
         }), 201
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@booking_bp.route('/guest/<int:guest_id>/dashboard', methods=['GET'])
+def get_guest_dashboard(guest_id):
+    """Get categorized bookings for guest dashboard: previous, today's, and upcoming"""
+    try:
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        from datetime import date
+        today = date.today()
+
+        base_query = '''
+            SELECT
+                b.id as booking_id,
+                b.booking_date,
+                b.booking_time,
+                b.status,
+                b.cuisine_type,
+                b.meal_type,
+                b.event_type,
+                b.number_of_people,
+                b.total_cost,
+                b.chef_id,
+                c.first_name as chef_first_name,
+                c.last_name as chef_last_name,
+                c.photo_url as chef_photo,
+                g.first_name as guest_first_name,
+                g.last_name as guest_last_name
+            FROM bookings b
+            LEFT JOIN chefs c ON b.chef_id = c.id
+            LEFT JOIN guests g ON b.guest_id = g.id
+            WHERE b.guest_id = %s
+        '''
+
+        def format_booking_data(bookings):
+            formatted = []
+            for booking in bookings:
+                formatted_booking = dict(booking)
+                if formatted_booking.get('booking_date'):
+                    formatted_booking['booking_date'] = str(formatted_booking['booking_date'])
+                if formatted_booking.get('booking_time'):
+                    formatted_booking['booking_time'] = str(formatted_booking['booking_time'])
+                if formatted_booking.get('created_at'):
+                    formatted_booking['created_at'] = formatted_booking['created_at'].isoformat()
+                if formatted_booking.get('total_cost') is not None:
+                    formatted_booking['total_cost'] = float(formatted_booking['total_cost'])
+                formatted.append(formatted_booking)
+            return formatted
+
+        buckets = {}
+        for key, condition in {
+            'previous_bookings': 'AND b.booking_date < %s',
+            'todays_bookings': 'AND b.booking_date = %s',
+            'upcoming_bookings': 'AND b.booking_date > %s',
+        }.items():
+            cursor.execute(base_query + condition + ' ORDER BY b.booking_date DESC, b.booking_time DESC', (guest_id, today))
+            rows = cursor.fetchall()
+            buckets[key] = format_booking_data(rows)
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({'success': True, 'data': buckets}), 200
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
