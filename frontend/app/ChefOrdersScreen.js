@@ -68,7 +68,7 @@ export default function ChefOrdersScreen() {
     const fetchBookings = async () => {
         try {
             setLoading(true);
-            const url = `${apiUrl}/booking/chef/${profileId}/bookings`;
+            const url = `${apiUrl}/chef/${profileId}/bookings`;
             const response = await fetch(url, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -125,7 +125,7 @@ export default function ChefOrdersScreen() {
 
     const updateBookingStatus = async (bookingId, newStatus) => {
         try {
-            const response = await fetch(`${apiUrl}/booking/booking/${bookingId}/status`, {
+            const response = await fetch(`${apiUrl}/${bookingId}/status`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ status: newStatus }),

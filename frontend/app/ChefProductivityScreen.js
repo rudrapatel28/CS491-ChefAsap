@@ -27,7 +27,7 @@ async function callAssistant({ token, bookingId, capability, body }) {
     const { apiUrl } = getEnvVars();
     const path = capability === 'subs'
         ? '/api/v1/chef-productivity/substitutions'
-        : `/api/v1/chef-productivity/booking/${bookingId}/${
+        : `/api/v1/chef-productivity/${bookingId}/${
             capability === 'prep' ? 'prep-list' : capability
         }`;
     const res = await fetch(`${apiUrl}${path}`, {
@@ -221,7 +221,7 @@ export default function ChefProductivityScreen() {
             if (!bookingId) return;
             const { apiUrl } = getEnvVars();
             try {
-                const res = await fetch(`${apiUrl}/api/v1/chef-productivity/booking/${bookingId}/sessions`, {
+                const res = await fetch(`${apiUrl}/api/v1/chef-productivity/${bookingId}/sessions`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 if (res.ok) {

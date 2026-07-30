@@ -87,20 +87,32 @@ export default function ChefProfileScreen() {
                 const featuredData = await featuredResponse.json();
                 if (featuredResponse.ok) setFeaturedItems(featuredData.featured_items || []);
 
-                const faveResponse = await fetch(`${apiUrl}/booking/customer/${profileId}/favorite-chefs/${chefId}`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                });
-                const faveData = await faveResponse.json();
-                if (faveResponse.ok) setIsFavorited(faveData.is_favorited || false);
+                if (userType === 'customer' && profileId) {
+                    const faveResponse = await fetch(
+                        `${apiUrl}/booking/customer/${profileId}/favorite-chefs/${chefId}`,
+                        {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                        }
+                    );
+
+                    const faveData = await faveResponse.json();
+
+                    if (faveResponse.ok) {
+                        setIsFavorited(faveData.is_favorited || false);
+                    }
+                }
 
                 if (userType === 'customer' && profileId) {
                     await fetch(`${apiUrl}/search/viewed-chefs/${profileId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ chef_id: chefId }),
-                    }).catch(() => {});
-                    
+                    }).catch(() => { });
+
                     console.log('Analytics firing with profileId:', profileId, 'userId:', userId);
                     logAppEvent({
                         token,
@@ -123,26 +135,78 @@ export default function ChefProfileScreen() {
     }, [id, apiUrl, token]);
 
     const handleFavoriting = async () => {
+
+        if (userType === 'guest') {
+            Alert.alert(
+                'Account Required',
+                'Please create an account to favorite chefs.'
+            );
+            return;
+        }
+
         const chefId = parseInt(id, 10);
+
         setUpdatingFavoriteStatus(true);
+
         try {
-            await fetch(`${apiUrl}/booking/customer/${profileId}/favorite-chefs/${chefId}`, {
-                method: isFavorited ? 'DELETE' : 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            });
+
+            await fetch(
+                `${apiUrl}/booking/customer/${profileId}/favorite-chefs/${chefId}`,
+                {
+                    method: isFavorited ? 'DELETE' : 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                }
+            );
+
             setIsFavorited(!isFavorited);
+
         } catch (err) {
-            Alert.alert('Error', 'Could not update favorite status.');
+
+            Alert.alert(
+                'Error',
+                'Could not update favorite status.'
+            );
+
         } finally {
+
             setUpdatingFavoriteStatus(false);
+
         }
     };
-
     const handleChatPress = () => {
-        if (userType !== 'customer') { Alert.alert('Error', 'Only customers can message chefs.'); return; }
+
+        if (userType === 'guest') {
+
+            Alert.alert(
+                'Account Required',
+                'Please create an account to message chefs.'
+            );
+
+            return;
+        }
+
+
+        if (userType !== 'customer') {
+
+            Alert.alert(
+                'Error',
+                'Only customers can message chefs.'
+            );
+
+            return;
+        }
+
+
         router.push({
             pathname: '/ChatScreen',
-            params: { otherUserId: id, otherUserName: `${chefData?.first_name} ${chefData?.last_name}` },
+            params: {
+                otherUserId: id,
+                otherUserName:
+                    `${chefData?.first_name} ${chefData?.last_name}`
+            },
         });
     };
 
@@ -165,17 +229,25 @@ export default function ChefProfileScreen() {
                 {/* Hero Card */}
                 <View style={s.card}>
                     {/* Favorite button */}
-                    <TouchableOpacity
-                        onPress={handleFavoriting}
-                        disabled={updatingFavoriteStatus}
-                        style={s.favoriteBtn}
-                    >
-                        <Octicons
-                            name={updatingFavoriteStatus ? 'sync' : isFavorited ? 'heart-fill' : 'heart'}
-                            size={20}
-                            color={isFavorited ? '#ef4444' : GREEN}
-                        />
-                    </TouchableOpacity>
+                    {userType === 'customer' && (
+                        <TouchableOpacity
+                            onPress={handleFavoriting}
+                            disabled={updatingFavoriteStatus}
+                            style={s.favoriteBtn}
+                        >
+                            <Octicons
+                                name={
+                                    updatingFavoriteStatus
+                                        ? 'sync'
+                                        : isFavorited
+                                            ? 'heart-fill'
+                                            : 'heart'
+                                }
+                                size={20}
+                                color={isFavorited ? '#ef4444' : GREEN}
+                            />
+                        </TouchableOpacity>
+                    )}
 
                     <View style={s.profileCenter}>
                         <ProfilePicture

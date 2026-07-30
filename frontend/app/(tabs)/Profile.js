@@ -1,6 +1,6 @@
 import React from 'react';
 import { useEffect, useState } from "react";
-import { useRouter, useFocusEffect  } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { ScrollView, Text, View, Alert, TouchableOpacity, StyleSheet } from "react-native";
 
 import getEnvVars from "../../config";
@@ -27,7 +27,7 @@ const TEXT_MID = '#4a7c59';
 const TEXT_SOFT = '#8aab8a';
 
 export default function ProfileScreen() {
-    const { logout, token, userType, userId, profileId } = useAuth();
+    const { logout, token, userType, userId, profileId, isGuest } = useAuth();
     const router = useRouter();
     const { apiUrl } = getEnvVars();
 
@@ -45,37 +45,49 @@ export default function ProfileScreen() {
     const [showAddCardModal, setShowAddCardModal] = useState(false);
     const [paymentMethods, setPaymentMethods] = useState([]);
     const [loadingPaymentMethods, setLoadingPaymentMethods] = useState(false);
+    const [recentBooking, setRecentBooking] = useState(null);
 
     useFocusEffect(
         React.useCallback(() => {
-        const fetchProfile = async () => {
-            if (!userId || !token || !userType || !profileId) return;
-            setLoading(true);
-            setError(null);
-            try {
-                const url = `${apiUrl}/profile/${userType}/${profileId}`;
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                });
-                const data = await response.json();
-                if (response.ok) {
-                    setProfileData(data.profile);
-                    setAboutText(data.profile.description || '');
-                    setSelectedCuisines(data.profile.cuisines || []);
-                    setSelectedMealTimings(data.profile.meal_timings || ['Breakfast', 'Lunch', 'Dinner']);
-                } else {
-                    setError(data.error || 'Failed to load profile.');
+            const fetchProfile = async () => {
+                if (isGuest) {
+                    setLoading(false);
+                    return;
                 }
-            } catch (err) {
-                setError(`Network error: ${err.message}`);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchProfile();
-    }, [profileId, userId, userType, token, apiUrl])
+
+                if (!userId || !token || !userType || !profileId) return;
+                setLoading(true);
+                setError(null);
+                try {
+                    const url = `${apiUrl}/profile/${userType}/${profileId}`;
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        setProfileData(data.profile);
+                        setAboutText(data.profile.description || '');
+                        setSelectedCuisines(data.profile.cuisines || []);
+                        setSelectedMealTimings(data.profile.meal_timings || ['Breakfast', 'Lunch', 'Dinner']);
+                    } else {
+                        setError(data.error || 'Failed to load profile.');
+                    }
+                } catch (err) {
+                    setError(`Network error: ${err.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            fetchProfile();
+        }, [profileId, userId, userType, token, apiUrl])
     );
+
+    useEffect(() => {
+        if (!isGuest && userType === 'customer') {
+            fetchRecentBooking();
+        }
+    }, [token, isGuest, userType]);
 
     useEffect(() => {
         const fetchCuisines = async () => {
@@ -87,14 +99,14 @@ export default function ProfileScreen() {
                 });
                 const data = await response.json();
                 if (response.ok) setAllCuisines(data.cuisines || []);
-            } catch (error) {}
+            } catch (error) { }
         };
         fetchCuisines();
     }, [userType, apiUrl, token]);
 
     useEffect(() => {
         const fetchPaymentMethods = async () => {
-            if (userType !== 'customer' || !userId) return;
+            if (userType !== 'customer' || !userId || isGuest) return;
             setLoadingPaymentMethods(true);
             try {
                 const response = await fetch(`${apiUrl}/stripe-payment/payment-methods?customer_id=${userId}`, {
@@ -103,7 +115,7 @@ export default function ProfileScreen() {
                 });
                 const data = await response.json();
                 if (response.ok) setPaymentMethods(data.payment_methods || []);
-            } catch (error) {}
+            } catch (error) { }
             finally { setLoadingPaymentMethods(false); }
         };
         fetchPaymentMethods();
@@ -149,7 +161,7 @@ export default function ProfileScreen() {
             } else {
                 Alert.alert('Error', data.error || 'Failed to set default');
             }
-        } catch (error) {}
+        } catch (error) { }
     };
 
     const refreshPaymentMethods = async () => {
@@ -161,7 +173,7 @@ export default function ProfileScreen() {
             });
             const data = await response.json();
             if (response.ok) setPaymentMethods(data.payment_methods || []);
-        } catch (error) {}
+        } catch (error) { }
         finally { setLoadingPaymentMethods(false); }
     };
 
@@ -249,13 +261,14 @@ export default function ProfileScreen() {
                 {/* Top actions */}
                 <View style={s.cardTopActions}>
                     <ThemeButton />
-                    <TouchableOpacity
-                        onPress={() => router.push('/ProfileSettings')}
-                        style={s.iconBtn}
-
-                    >
-                        <Octicons name="gear" size={18} color={GREEN} />
-                    </TouchableOpacity>
+                    {!isGuest && (
+                        <TouchableOpacity
+                            onPress={() => router.push('/ProfileSettings')}
+                            style={s.iconBtn}
+                        >
+                            <Octicons name="gear" size={18} color={GREEN} />
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 <View style={s.profileCenter}>
@@ -265,10 +278,13 @@ export default function ProfileScreen() {
                         lastName={profileData?.last_name}
                     />
                     <Text style={s.profileName}>
-                        {profileData?.first_name?.toUpperCase()} {profileData?.last_name?.toUpperCase()}
+                        {isGuest
+                            ? "Guest Account"
+                            : `${profileData?.first_name?.toUpperCase()} ${profileData?.last_name?.toUpperCase()}`
+                        }
                     </Text>
                     <Text style={s.profileRole}>
-                        {userType?.charAt(0).toUpperCase() + userType?.slice(1)}
+                        {isGuest ? "Guest Customer" : userType?.charAt(0).toUpperCase() + userType?.slice(1)}
                     </Text>
                     {userType === 'chef' && (
                         <View style={{ alignItems: 'center', marginTop: 4 }}>
@@ -276,118 +292,131 @@ export default function ProfileScreen() {
                             <Text style={s.reviewCount}>{profileData?.total_reviews} Total Reviews</Text>
                         </View>
                     )}
-                    <View style={s.memberRow}>
-                        <Text style={s.memberText}>Member Since: {profileData?.member_since}</Text>
-                    </View>
+                    {!isGuest && (
+                        <View style={s.memberRow}>
+                            <Text style={s.memberText}>
+                                Member Since: {profileData?.member_since}
+                            </Text>
+                        </View>
+                    )}
                 </View>
             </View>
 
-            {userType === 'customer' ? (
-                <>
-                    {/* Payment Methods */}
-                    <View style={s.card}>
-                        <View style={s.sectionHeader}>
-                            <Octicons name="credit-card" size={18} color={GREEN} style={{ marginRight: 8 }} />
-                            <Text style={s.sectionTitle}>Payment Methods</Text>
-                        </View>
-                        <View style={s.sectionBody}>
-                            {loadingPaymentMethods ? (
-                                <LoadingIcon icon="spinner" size={48} message="" />
-                            ) : paymentMethods.length > 0 ? (
-                                <View>
-                                    {paymentMethods.map((pm) => (
-                                        <View key={pm.id} style={s.cardRow}>
-                                            <Text style={{ fontSize: 22, marginRight: 12 }}>💳</Text>
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={s.cardNumber}>•••• {pm.last4}</Text>
-                                                <Text style={s.cardMeta}>
-                                                    {pm.brand.toUpperCase()} · Expires {pm.exp_month}/{pm.exp_year}
-                                                </Text>
-                                                {pm.is_default && (
-                                                    <Text style={s.defaultBadge}>✓ Default</Text>
-                                                )}
-                                            </View>
-                                            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                                                {!pm.is_default && (
-                                                    <TouchableOpacity
-                                                        onPress={() => handleSetDefaultCard(pm.id)}
-                                                        style={s.setDefaultBtn}
-                                                    >
-                                                        <Text style={s.setDefaultText}>Set Default</Text>
-                                                    </TouchableOpacity>
-                                                )}
-                                                <TestPaymentButton customerId={userId} paymentMethodId={pm.id} />
+            {userType === 'customer' ? (<>                {/* Payment Methods */}
+                <View style={s.card}>
+                    <View style={s.sectionHeader}>
+                        <Octicons name="credit-card" size={18} color={GREEN} style={{ marginRight: 8 }} />
+                        <Text style={s.sectionTitle}>Payment Methods</Text>
+                    </View>
+                    <View style={s.sectionBody}>
+                        {isGuest && (
+                            <Text style={s.emptyText}>
+                                Guest checkout is available. Your payment information will only be used for this purchase.
+                            </Text>
+                        )}
+                        {loadingPaymentMethods ? (
+                            <LoadingIcon icon="spinner" size={48} message="" />
+                        ) : paymentMethods.length > 0 ? (
+                            <View>
+                                {paymentMethods.map((pm) => (
+                                    <View key={pm.id} style={s.cardRow}>
+                                        <Text style={{ fontSize: 22, marginRight: 12 }}>💳</Text>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={s.cardNumber}>•••• {pm.last4}</Text>
+                                            <Text style={s.cardMeta}>
+                                                {pm.brand.toUpperCase()} · Expires {pm.exp_month}/{pm.exp_year}
+                                            </Text>
+                                            {pm.is_default && (
+                                                <Text style={s.defaultBadge}>✓ Default</Text>
+                                            )}
+                                        </View>
+                                        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                                            {!pm.is_default && (
+                                                <TouchableOpacity
+                                                    onPress={() => handleSetDefaultCard(pm.id)}
+                                                    style={s.setDefaultBtn}
+                                                >
+                                                    <Text style={s.setDefaultText}>Set Default</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            <TestPaymentButton customerId={userId} paymentMethodId={pm.id} />
+                                            {!isGuest && (
                                                 <TouchableOpacity onPress={() => handleDeleteCard(pm.id)}>
                                                     <Octicons name="trash" size={18} color="#ef4444" />
                                                 </TouchableOpacity>
-                                            </View>
+                                            )}
                                         </View>
-                                    ))}
-                                    <TouchableOpacity style={s.addCardBtn} onPress={() => setShowAddCardModal(true)}>
-                                        <Octicons name="plus" size={16} color={GREEN} />
-                                        <Text style={s.addCardText}>Add New Card</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            ) : (
-                                <View style={{ alignItems: 'center' }}>
-                                    <Text style={s.emptyText}>No saved cards yet</Text>
-                                    <TouchableOpacity style={s.addCardBtnFull} onPress={() => setShowAddCardModal(true)}>
-                                        <Octicons name="plus" size={16} color={GREEN} style={{ marginRight: 6 }} />
-                                        <Text style={s.addCardText}>Add Bank Card</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            )}
-                            <Text style={s.stripeNote}>Powered by Stripe - PCI DSS compliant</Text>
-                        </View>
+                                    </View>
+                                ))}
+                                <TouchableOpacity style={s.addCardBtn} onPress={() => setShowAddCardModal(true)}>
+                                    <Octicons name="plus" size={16} color={GREEN} />
+                                    <Text style={s.addCardText}>Add New Card</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            <View style={{ alignItems: 'center' }}>
+                                <Text style={s.emptyText}>No saved cards yet</Text>
+                                <TouchableOpacity style={s.addCardBtnFull} onPress={() => setShowAddCardModal(true)}>
+                                    <Octicons name="plus" size={16} color={GREEN} style={{ marginRight: 6 }} />
+                                    <Text style={s.addCardText}>Add Bank Card</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                        <Text style={s.stripeNote}>Powered by Stripe - PCI DSS compliant</Text>
                     </View>
+                </View>
 
+                {!isGuest && (
                     <AddCardModal
                         visible={showAddCardModal}
                         onClose={() => setShowAddCardModal(false)}
                         onSuccess={refreshPaymentMethods}
                         customerId={userId}
                     />
+                )}
 
-                    {/* Help & Policies */}
-                    <View style={s.card}>
-                        <View style={s.sectionHeader}>
-                            <Octicons name="info" size={18} color={GREEN} style={{ marginRight: 8 }} />
-                            <Text style={s.sectionTitle}>Help & Policies</Text>
-                        </View>
-                        <View style={s.sectionBody}>
-                            {['Help', 'Policies'].map((item, i) => (
-                                <TouchableOpacity key={item} style={[s.helpRow, i < 1 && s.helpRowBorder]}>
-                                    <Text style={s.helpText}>{item}</Text>
-                                    <Octicons name="chevron-right" size={16} color={TEXT_SOFT} />
-                                </TouchableOpacity>
-                            ))}
-                        </View>
+
+
+                {/* Help & Policies */}
+                <View style={s.card}>
+                    <View style={s.sectionHeader}>
+                        <Octicons name="info" size={18} color={GREEN} style={{ marginRight: 8 }} />
+                        <Text style={s.sectionTitle}>Help & Policies</Text>
                     </View>
-
-                    {/* Admin Dashboards */}
-                    <View style={s.card}>
-                        <View style={s.sectionHeader}>
-                            <Octicons name="graph" size={18} color={GREEN} style={{ marginRight: 8 }} />
-                            <Text style={s.sectionTitle}>Admin Dashboards</Text>
-                        </View>
-                        <View style={s.sectionBody}>
-                            <TouchableOpacity
-                                style={[s.helpRow, s.helpRowBorder]}
-                                onPress={() => router.push('/AdminUnmetDemand')}
-                            >
-                                <Text style={s.helpText}>Unmet Demand Dashboard</Text>
+                    <View style={s.sectionBody}>
+                        {['Help', 'Policies'].map((item, i) => (
+                            <TouchableOpacity key={item} style={[s.helpRow, i < 1 && s.helpRowBorder]}>
+                                <Text style={s.helpText}>{item}</Text>
                                 <Octicons name="chevron-right" size={16} color={TEXT_SOFT} />
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                style={s.helpRow}
-                                onPress={() => router.push('/FraudDesk')}
-                            >
-                                <Text style={s.helpText}>Fraud Desk</Text>
-                                <Octicons name="chevron-right" size={16} color={TEXT_SOFT} />
-                            </TouchableOpacity>
-                        </View>
+                        ))}
                     </View>
-                </>
+                </View>
+
+                {/* Admin Dashboards */}
+                <View style={s.card}>
+                    <View style={s.sectionHeader}>
+                        <Octicons name="graph" size={18} color={GREEN} style={{ marginRight: 8 }} />
+                        <Text style={s.sectionTitle}>Admin Dashboards</Text>
+                    </View>
+                    <View style={s.sectionBody}>
+                        <TouchableOpacity
+                            style={[s.helpRow, s.helpRowBorder]}
+                            onPress={() => router.push('/AdminUnmetDemand')}
+                        >
+                            <Text style={s.helpText}>Unmet Demand Dashboard</Text>
+                            <Octicons name="chevron-right" size={16} color={TEXT_SOFT} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={s.helpRow}
+                            onPress={() => router.push('/FraudDesk')}
+                        >
+                            <Text style={s.helpText}>Fraud Desk</Text>
+                            <Octicons name="chevron-right" size={16} color={TEXT_SOFT} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </>
             ) : (
                 <>
                     {/* Chef Details */}
@@ -524,7 +553,13 @@ export default function ProfileScreen() {
             )}
 
             {/* Log out */}
-            <TouchableOpacity style={s.logoutBtn} onPress={logout} activeOpacity={0.85}>
+            <TouchableOpacity style={s.logoutBtn} onPress={() => {
+                if (isGuest) {
+                    router.push('/');
+                } else {
+                    logout();
+                }
+            }} activeOpacity={0.85}>
                 <Text style={s.logoutText}>Log out</Text>
             </TouchableOpacity>
 

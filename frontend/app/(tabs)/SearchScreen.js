@@ -68,7 +68,7 @@ export default function SearchScreen() {
     });
 
     const { apiUrl } = getEnvVars();
-    const { token, userId, profileId } = useAuth();
+    const { token, userId, profileId, isGuest } = useAuth();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -89,9 +89,13 @@ export default function SearchScreen() {
         setRefreshing(true);
         errorAlertShownRef.current = false;
         autoLoadDoneRef.current = false;
-        fetchRecentSearches();
-        fetchRecentChefs();
-        fetchFavoriteChefs();
+
+        if (!isGuest) {
+            fetchRecentSearches();
+            fetchRecentChefs();
+            fetchFavoriteChefs();
+        }
+
         fetchSearchResults();
     };
 
@@ -108,12 +112,12 @@ export default function SearchScreen() {
     }, [formData.latitude, formData.longitude, token]);
 
     useEffect(() => {
-        if (token && profileId) {
+        if (!isGuest && token && profileId) {
             fetchRecentSearches();
             fetchRecentChefs();
             fetchFavoriteChefs();
         }
-    }, [token, profileId]);
+    }, [token, profileId, isGuest]);
 
     const handleSearch = () => {
         if (formData.locationPostalCode) {
@@ -193,7 +197,9 @@ export default function SearchScreen() {
             const otherFutureParams = ['searchQuery', 'searchType', 'gender', 'timing', 'cuisine'];
             const allRelevantParams = [...apiParams, ...otherFutureParams];
 
-            if (profileId) searchParams.append('customer_id', profileId);
+            if (!isGuest && profileId) {
+                searchParams.append('customer_id', profileId);
+            }
 
             for (const key of allRelevantParams) {
                 const value = formData[key];
@@ -234,7 +240,10 @@ export default function SearchScreen() {
                 setSearchResults(transformedResults);
                 setError(null);
                 errorAlertShownRef.current = false;
-                fetchRecentSearches();
+                if (!isGuest) {
+                    fetchRecentSearches();
+                }
+
                 setRefreshKey(prev => prev + 1);
             } else {
                 setError(data.error || 'Failed to load results.');
@@ -309,24 +318,28 @@ export default function SearchScreen() {
                 setFormData={setFormData}
                 handleSearch={handleSearch}
             />
-            <Card
-                title="Favorite Chefs"
-                headerIcon="heart"
-                isCollapsible={true}
-                isScrollable={true}
-                scrollDirection="horizontal"
-            >
-                {loadingFaves ? <LoadingIcon message='' size={64} icon='spinner' /> : favoriteChefs.length > 0 ? (
-                    favoriteChefs.map((chef) => renderSmallCard(chef))
-                ) : (
-                    <View className="p-4">
-                        <Text className="text-primary-700 dark:text-dark-700 text-center">
-                            Favorited chefs will appear here.
-                        </Text>
-                    </View>
-                )}
-            </Card>
-            <Card
+            {!isGuest && (
+                <Card
+                    title="Favorite Chefs"
+                    headerIcon="heart"
+                    isCollapsible={true}
+                    isScrollable={true}
+                    scrollDirection="horizontal"
+                >
+                    {loadingFaves ? (
+                        <LoadingIcon message="" size={64} icon="spinner" />
+                    ) : favoriteChefs.length > 0 ? (
+                        favoriteChefs.map((chef) => renderSmallCard(chef))
+                    ) : (
+                        <View className="p-4">
+                            <Text className="text-primary-700 dark:text-dark-700 text-center">
+                                Favorited chefs will appear here.
+                            </Text>
+                        </View>
+                    )}
+                </Card>
+            )}
+            {!isGuest && (<Card
                 title="Recent Chefs"
                 headerIcon="history"
                 isCollapsible={true}
@@ -343,6 +356,7 @@ export default function SearchScreen() {
                     </View>
                 )}
             </Card>
+            )}
 
             {/* AI Event Planner banner */}
             <PlannerBanner onPress={() => router.push('/MenuPlannerScreen')} />
