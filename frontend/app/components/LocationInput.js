@@ -46,7 +46,11 @@ export default function LocationInput({ formData, setFormData }) {
 
     useEffect(() => {
         const loadLocation = async () => {
-            const storedLocation = await AsyncStorage.getItem('last-used-location');
+            const storedLocation = await AsyncStorage.getItem(
+                formData.profileId
+                    ? `last-used-location-${formData.profileId}`
+                    : 'guest-last-used-location'
+            );
             if (storedLocation) {
                 setAddressInput(storedLocation);
                 geocodeAddress(storedLocation);
@@ -123,7 +127,12 @@ export default function LocationInput({ formData, setFormData }) {
 
             setAddressInput(fullAddress);
             mergeLocation(latitude, longitude, { fullAddress, displayLine, postalCode });
-            await updateSavedLocation(fullAddress);
+
+            // Save only if user has an account
+            if (formData.profileId) {
+                await updateSavedLocation(fullAddress);
+            }
+
             setSelection({ start: 0, end: 0 });
             setIsEditing(false);
         } catch (err) {

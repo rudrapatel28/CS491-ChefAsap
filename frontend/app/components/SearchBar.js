@@ -10,32 +10,47 @@ export default function SearchBarComponent({ formData, setFormData, handleSearch
     const [recentSearches, setRecentSearches] = useState([]);
     const [isDropVisible, setIsDropVisible] = useState(false);
     const { apiUrl } = getEnvVars();
-    const { token, profileId } = useAuth();
+    const { token, profileId, isGuestBrowsing } = useAuth();
 
     useEffect(() => {
         const fetchRecentSearches = async () => {
-            if (!profileId || !token) return;
+
+            // Guests do not have saved searches
+            if (isGuestBrowsing || !profileId || !token) return;
+
             try {
                 const url = `${apiUrl}/search/recent/${profileId}?limit=3`;
+
                 const response = await fetch(url, {
                     method: 'GET',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token && {
+                            'Authorization': `Bearer ${token}`
+                        }),
+                    },
                 });
+
                 const data = await response.json();
+
                 if (response.ok && data.success) {
                     const formattedSearches = data.recent_searches.map(search => ({
                         query: search.search_query || search.cuisine || 'Recent search',
                         type: search.cuisine && !search.search_query ? 'cuisine' : 'chef',
                         fullData: search,
                     }));
+
                     setRecentSearches(formattedSearches);
                 }
+
             } catch (err) {
                 console.error('Failed to fetch recent searches:', err);
             }
         };
+
         fetchRecentSearches();
-    }, [profileId, token, apiUrl]);
+
+    }, [profileId, token, apiUrl, isGuestBrowsing]);
 
     const genderItems = [
         { label: "All", value: "all" },

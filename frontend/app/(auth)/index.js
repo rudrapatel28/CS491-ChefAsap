@@ -1,9 +1,16 @@
 import { Text, View, Image, StyleSheet, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from 'expo-router';
+import { useAuth } from '../context/AuthContext';
 
 export default function LandingScreen() {
   const router = useRouter();
+  const { enterGuestMode } = useAuth();
+
+  const handleGuestBrowse = () => {
+    enterGuestMode();
+    router.push('/'); // change this to your chef browsing screen
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -31,6 +38,7 @@ export default function LandingScreen() {
 
         {/* Buttons */}
         <View style={styles.btnGroup}>
+
           <TouchableOpacity
             style={styles.primaryBtn}
             onPress={() => router.push('/SignUpScreen')}
@@ -39,13 +47,29 @@ export default function LandingScreen() {
             <Text style={styles.primaryBtnText}>Get Started</Text>
           </TouchableOpacity>
 
+
           <TouchableOpacity
             style={styles.secondaryBtn}
             onPress={() => router.push('/SignInScreen')}
             activeOpacity={0.85}
           >
-            <Text style={styles.secondaryBtnText}>I already have an account</Text>
+            <Text style={styles.secondaryBtnText}>
+              I already have an account
+            </Text>
           </TouchableOpacity>
+
+
+          {/* Guest Browse Button */}
+          <TouchableOpacity
+            style={styles.guestBtn}
+            onPress={handleGuestBrowse}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.guestBtnText}>
+              Browse as Guest
+            </Text>
+          </TouchableOpacity>
+
         </View>
 
       </View>
@@ -58,23 +82,27 @@ const GREEN_LIGHT = '#d8f3dc';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8faf8' },
+
   inner: {
     flex: 1,
     paddingHorizontal: 28,
     justifyContent: 'space-between',
     paddingVertical: 24,
   },
+
   logoArea: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   logo: {
     width: 130,
     height: 130,
     marginBottom: 20,
     borderRadius: 32,
   },
+
   appName: {
     fontSize: 36,
     fontWeight: '800',
@@ -82,11 +110,13 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
     marginBottom: 8,
   },
+
   tagline: {
     fontSize: 16,
     color: '#6b8f71',
     textAlign: 'center',
   },
+
   pillsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -94,35 +124,38 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 32,
   },
+
   pill: {
     paddingHorizontal: 14,
     paddingVertical: 7,
     backgroundColor: GREEN_LIGHT,
     borderRadius: 20,
   },
+
   pillText: {
     fontSize: 12,
     color: GREEN,
     fontWeight: '600',
   },
-  btnGroup: { gap: 12, paddingBottom: 8 },
+
+  btnGroup: {
+    gap: 12,
+    paddingBottom: 8
+  },
+
   primaryBtn: {
     backgroundColor: GREEN,
     paddingVertical: 17,
     borderRadius: 14,
     alignItems: 'center',
-    shadowColor: GREEN,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
   },
+
   primaryBtnText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
-    letterSpacing: 0.3,
   },
+
   secondaryBtn: {
     paddingVertical: 16,
     borderRadius: 14,
@@ -131,8 +164,21 @@ const styles = StyleSheet.create({
     borderColor: GREEN,
     backgroundColor: '#fff',
   },
+
   secondaryBtnText: {
     color: GREEN,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  guestBtn: {
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+
+  guestBtnText: {
+    color: '#6b8f71',
     fontSize: 15,
     fontWeight: '600',
   },

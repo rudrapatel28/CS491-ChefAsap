@@ -68,7 +68,7 @@ export default function SearchScreen() {
     });
 
     const { apiUrl } = getEnvVars();
-    const { token, userId, profileId } = useAuth();
+    const { token, userId, profileId, isGuestBrowsing } = useAuth();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -85,6 +85,28 @@ export default function SearchScreen() {
     const errorAlertShownRef = useRef(false);
     const autoLoadDoneRef = useRef(false);
 
+
+    const requireAccount = () => {
+        Alert.alert(
+            "Account Required",
+            "You need to create an account to continue with this feature.",
+            [
+                {
+                    text: "Cancel",
+                    style: "cancel"
+                },
+                {
+                    text: "Create Account",
+                    onPress: () => router.push('/(auth)/SignUpScreen')
+                }
+            ]
+        );
+    };
+
+    const exitGuestMode = () => {
+        router.replace('/(auth)');
+    };
+
     const onRefresh = () => {
         setRefreshing(true);
         errorAlertShownRef.current = false;
@@ -100,23 +122,32 @@ export default function SearchScreen() {
     }, [loading, loadingFaves, loadingRecent]);
 
     useEffect(() => {
-        if (formData.latitude && formData.longitude && token && !autoLoadDoneRef.current) {
+        if (
+            formData.latitude &&
+            formData.longitude &&
+            !autoLoadDoneRef.current
+        ) {
             autoLoadDoneRef.current = true;
             fetchSearchResults();
             setAutoLoadCompleted(true);
         }
-    }, [formData.latitude, formData.longitude, token]);
+    }, [formData.latitude, formData.longitude]);
 
     useEffect(() => {
+
+        // Guests do not have saved data
+        if (isGuestBrowsing) return;
+
         if (token && profileId) {
             fetchRecentSearches();
             fetchRecentChefs();
             fetchFavoriteChefs();
         }
-    }, [token, profileId]);
+
+    }, [token, profileId, isGuestBrowsing]);
 
     const handleSearch = () => {
-        if (formData.locationPostalCode) {
+        if (formData.locationPostalCode && !isGuestBrowsing) {
             logAppEvent({
                 token,
                 eventCategory: 'interaction',
@@ -193,7 +224,10 @@ export default function SearchScreen() {
             const otherFutureParams = ['searchQuery', 'searchType', 'gender', 'timing', 'cuisine'];
             const allRelevantParams = [...apiParams, ...otherFutureParams];
 
-            if (profileId) searchParams.append('customer_id', profileId);
+            // Only attach customer ID for logged-in users
+            if (profileId && !isGuestBrowsing) {
+                searchParams.append('customer_id', profileId);
+            }
 
             for (const key of allRelevantParams) {
                 const value = formData[key];
@@ -234,7 +268,11 @@ export default function SearchScreen() {
                 setSearchResults(transformedResults);
                 setError(null);
                 errorAlertShownRef.current = false;
-                fetchRecentSearches();
+
+                if (!isGuestBrowsing) {
+                    fetchRecentSearches();
+                }
+
                 setRefreshKey(prev => prev + 1);
             } else {
                 setError(data.error || 'Failed to load results.');
@@ -309,67 +347,106 @@ export default function SearchScreen() {
                 setFormData={setFormData}
                 handleSearch={handleSearch}
             />
-            <Card
-                title="Favorite Chefs"
-                headerIcon="heart"
-                isCollapsible={true}
-                isScrollable={true}
-                scrollDirection="horizontal"
-            >
-                {loadingFaves ? <LoadingIcon message='' size={64} icon='spinner' /> : favoriteChefs.length > 0 ? (
-                    favoriteChefs.map((chef) => renderSmallCard(chef))
-                ) : (
-                    <View className="p-4">
-                        <Text className="text-primary-700 dark:text-dark-700 text-center">
-                            Favorited chefs will appear here.
-                        </Text>
-                    </View>
-                )}
-            </Card>
-            <Card
-                title="Recent Chefs"
-                headerIcon="history"
-                isCollapsible={true}
-                isScrollable={true}
-                scrollDirection="horizontal"
-            >
-                {loadingRecent ? <LoadingIcon message='' size={64} icon='spinner' /> : recentChefs.length > 0 ? (
-                    recentChefs.map((chef) => renderSmallCard(chef))
-                ) : (
-                    <View className="p-4">
-                        <Text className="text-primary-700 dark:text-dark-700 text-center">
-                            Recently ordered from chefs will appear here.
-                        </Text>
-                    </View>
-                )}
-            </Card>
+            {!isGuestBrowsing && (
+                <Card
+                    title="Favorite Chefs"
+                    headerIcon="heart"
+                    isCollapsible={true}
+                    isScrollable={true}
+                    scrollDirection="horizontal"
+                >
+                    {loadingFaves ? <LoadingIcon message='' size={64} icon='spinner' /> : favoriteChefs.length > 0 ? (
+                        favoriteChefs.map((chef) => renderSmallCard(chef))
+                    ) : (
+                        <View className="p-4">
+                            <Text className="text-primary-700 dark:text-dark-700 text-center">
+                                Favorited chefs will appear here.
+                            </Text>
+                        </View>
+                    )}
+                </Card>)}
+            {!isGuestBrowsing && (
+                <Card title="Recent Chefs"
+                    headerIcon="history"
+                    isCollapsible={true}
+                    isScrollable={true}
+                    scrollDirection="horizontal"
+                >
+                    {loadingRecent ? <LoadingIcon message='' size={64} icon='spinner' /> : recentChefs.length > 0 ? (
+                        recentChefs.map((chef) => renderSmallCard(chef))
+                    ) : (
+                        <View className="p-4">
+                            <Text className="text-primary-700 dark:text-dark-700 text-center">
+                                Recently ordered from chefs will appear here.
+                            </Text>
+                        </View>
+                    )}
+                </Card>)}
 
             {/* AI Event Planner banner */}
-            <PlannerBanner onPress={() => router.push('/MenuPlannerScreen')} />
+            <PlannerBanner
+                onPress={() => {
+                    if (isGuestBrowsing) {
+                        requireAccount();
+                    } else {
+                        router.push('/MenuPlannerScreen');
+                    }
+                }}
+            />
 
             <Card
                 title="Nearby Chefs"
                 headerIcon="location"
-                isScrollable={true}
-                scrollDirection="vertical"
             >
-                {searchResults.length !== 0 ? searchResults.map((result, index) =>
-                    <SearchResultCard
-                        key={index}
-                        chef_id={result["chef_id"]}
-                        first_name={result["first_name"]}
-                        last_name={result["last_name"]}
-                        distance={result["distance"]}
-                        cuisine={result["cuisine"]}
-                        timing={result["timing"]}
-                        average_rating={result["average_rating"]}
-                        review_count={result["review_count"]}
-                        hourly_rate={result["hourly_rate"]}
-                    />)
-                    :
+                
+                {loading ? (
                     <LoadingIcon icon='food' size={64} message='Fetching Nearby Chefs...' />
-                }
+                ) : searchResults.length !== 0 ? (
+                    searchResults.map((result, index) =>
+                        <SearchResultCard
+                            key={index}
+                            chef_id={result.chef_id}
+                            first_name={result.first_name}
+                            last_name={result.last_name}
+                            distance={result.distance}
+                            cuisine={result.cuisine}
+                            timing={result.timing}
+                            average_rating={result.average_rating}
+                            review_count={result.review_count}
+                            hourly_rate={result.hourly_rate}
+                        />
+                    )
+                ) : (
+                    <Text style={{ textAlign: 'center', padding: 20, color: '#8aab8a' }}>
+                        No chefs found nearby.
+                    </Text>
+                )}
             </Card>
+            {isGuestBrowsing && (
+                <TouchableOpacity
+                    onPress={exitGuestMode}
+                    style={{
+                        marginTop: 20,
+                        marginBottom: 10,
+                        paddingVertical: 14,
+                        borderRadius: 14,
+                        backgroundColor: '#2d6a4f',
+                        alignItems: 'center',
+                    }}
+                    activeOpacity={0.85}
+                >
+                    <Text
+                        style={{
+                            color: '#ffffff',
+                            fontSize: 15,
+                            fontWeight: '700',
+                        }}
+                    >
+                        Exit Guest Mode — Create Account
+                    </Text>
+                </TouchableOpacity>
+            )}
+
             <View className="h-8" />
         </ScrollView>
     );
