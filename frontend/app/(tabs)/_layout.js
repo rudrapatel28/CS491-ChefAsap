@@ -19,6 +19,7 @@ export default function TabLayout() {
     const router = useRouter();
     const { manualTheme } = useTheme();
     const [bookings, setBookings] = useState([]);
+    const [unreadMessageCount, setUnreadMessageCount] = useState(0);
 
     useEffect(() => {
         if (!isLoading && !isAuthenticated) {
@@ -43,8 +44,31 @@ export default function TabLayout() {
                 } catch (err) {}
             };
             fetchBookings();
+
+            const fetchUnreadMessages = async () => {
+                if (!profileId || !userType || !token) return;
+                try {
+                    const url = `${apiUrl}/api/chat/conversations?${userType}_id=${profileId}`;
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`,
+                        },
+                    });
+                    if (!response.ok) return;
+                    const data = await response.json();
+                    const unreadTotal = Array.isArray(data)
+                        ? data.reduce((total, conversation) => total + (Number(conversation.unread_count) || 0), 0)
+                        : 0;
+                    setUnreadMessageCount(unreadTotal);
+                } catch (err) {
+                    setUnreadMessageCount(0);
+                }
+            };
+            fetchUnreadMessages();
         }
-    }, [isLoading, isAuthenticated, router]);
+    }, [isLoading, isAuthenticated, router, apiUrl, profileId, token, userType]);
 
     const iconSize = 24;
     const isIOS = Platform.OS === 'ios';
@@ -105,7 +129,7 @@ export default function TabLayout() {
                     options={{
                         title: 'Messages',
                         tabBarIcon: ({ color }) => <Octicons name="comment-discussion" size={iconSize} color={color} />,
-                        tabBarBadge: 5,
+                        tabBarBadge: unreadMessageCount > 0 ? unreadMessageCount : undefined,
                         tabBarBadgeStyle: { backgroundColor: '#ef4444', color: '#ffffff', fontSize: 10 },
                     }}
                 />
@@ -161,7 +185,7 @@ export default function TabLayout() {
                     options={{
                         title: 'Messages',
                         tabBarIcon: ({ color }) => <Octicons name="comment-discussion" size={iconSize} color={color} />,
-                        tabBarBadge: 5,
+                        tabBarBadge: unreadMessageCount > 0 ? unreadMessageCount : undefined,
                         tabBarBadgeStyle: { backgroundColor: '#ef4444', color: '#ffffff', fontSize: 10 },
                     }}
                 />
