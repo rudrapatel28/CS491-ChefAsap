@@ -2,7 +2,8 @@ from flask import Blueprint, request, jsonify
 from flask_bcrypt import Bcrypt
 import jwt
 import re
-from datetime import datetime, timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
 from database.config import db_config
 from database.db_helper import get_db_connection, get_cursor, handle_db_error
 import sys
@@ -25,6 +26,18 @@ def validate_password(password):
     if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
         return False, "Password must contain at least one special character"
     return True, "Password is valid"
+
+def serialize_guest(guest_row):
+    return {
+        'guest_id': guest_row['id'],
+        'guest_code': guest_row['guest_code'],
+        'first_name': guest_row.get('first_name'),
+        'last_name': guest_row.get('last_name'),
+        'email': guest_row.get('email'),
+        'phone': guest_row.get('phone'),
+        'created_at': guest_row.get('created_at'),
+        'updated_at': guest_row.get('updated_at'),
+    }
 
 # Create the blueprint
 auth_bp = Blueprint('auth', __name__)
@@ -237,6 +250,95 @@ def signin():
         return jsonify(response_data), 200
 
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@auth_bp.route('/guest', methods=['POST'])
+def create_or_lookup_guest():
+    """Create or reuse a guest account using contact details."""
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        first_name = (data.get('firstName') or data.get('first_name') or '').strip()
+        last_name = (data.get('lastName') or data.get('last_name') or '').strip()
+        email = (data.get('email') or '').strip().lower()
+        phone = (data.get('phone') or '').strip()
+
+        if not email and not phone:
+            return jsonify({'error': 'Either email or phone is required for a guest account'}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        guest = None
+        created = False
+        if email:
+            cursor.execute('SELECT * FROM guests WHERE email = %s ORDER BY id DESC LIMIT 1', (email,))
+            guest = cursor.fetchone()
+        if not guest and phone:
+            cursor.execute('SELECT * FROM guests WHERE phone = %s ORDER BY id DESC LIMIT 1', (phone,))
+            guest = cursor.fetchone()
+
+        if guest:
+            update_fields = []
+            update_values = []
+            if first_name and first_name != (guest.get('first_name') or ''):
+                update_fields.append('first_name = %s')
+                update_values.append(first_name)
+            if last_name and last_name != (guest.get('last_name') or ''):
+                update_fields.append('last_name = %s')
+                update_values.append(last_name)
+            if email and email != (guest.get('email') or ''):
+                update_fields.append('email = %s')
+                update_values.append(email)
+            if phone and phone != (guest.get('phone') or ''):
+                update_fields.append('phone = %s')
+                update_values.append(phone)
+
+            if update_fields:
+                update_fields.append('updated_at = CURRENT_TIMESTAMP')
+                update_values.append(guest['id'])
+                cursor.execute(
+                    f"UPDATE guests SET {', '.join(update_fields)} WHERE id = %s RETURNING *",
+                    tuple(update_values)
+                )
+                guest = cursor.fetchone()
+        else:
+            guest_code = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO guests (guest_code, first_name, last_name, email, phone)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING *
+            ''', (guest_code, first_name or None, last_name or None, email or None, phone or None))
+            guest = cursor.fetchone()
+            created = True
+
+        conn.commit()
+
+        token = jwt.encode({
+            'guest_id': guest['id'],
+            'guest_code': guest['guest_code'],
+            'user_type': 'guest',
+            'exp': datetime.now(timezone.utc) + timedelta(days=1)
+        }, JWT_SECRET, algorithm='HS256')
+
+        payload = serialize_guest(guest)
+        payload.update({
+            'message': 'Guest account ready',
+            'token': token,
+            'user_type': 'guest',
+        })
+        return jsonify(payload), 201 if created else 200
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
         return jsonify({'error': str(e)}), 500
     finally:
         if cursor:

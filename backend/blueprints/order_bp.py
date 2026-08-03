@@ -13,6 +13,7 @@ def create_order():
         data = request.get_json()
         
         customer_id = data.get('customer_id')
+        guest_id = data.get('guest_id')
         chef_id = data.get('chef_id')
         order_items = data.get('order_items', [])  # Array of {menu_item_id, quantity, unit_price, dish_name}
         delivery_address = data.get('delivery_address', '')
@@ -20,7 +21,10 @@ def create_order():
         delivery_datetime = data.get('delivery_datetime')  # ISO format datetime string
         
         # Validation
-        if not all([customer_id, chef_id, order_items]):
+        if customer_id and guest_id:
+            return jsonify({'error': 'Use either customer_id or guest_id, not both'}), 400
+
+        if not (customer_id or guest_id) or not chef_id or not order_items:
             return jsonify({'error': 'Missing required fields'}), 400
         
         if not isinstance(order_items, list) or len(order_items) == 0:
@@ -28,6 +32,13 @@ def create_order():
         
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        if guest_id:
+            cursor.execute('SELECT id FROM guests WHERE id = %s', (guest_id,))
+            if not cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Guest not found'}), 404
         
         # Calculate total amount and max prep time
         total_amount = 0
@@ -49,11 +60,11 @@ def create_order():
         
         # Create order
         cursor.execute('''
-            INSERT INTO orders (customer_id, chef_id, total_amount, estimated_prep_time, 
+            INSERT INTO orders (customer_id, guest_id, chef_id, total_amount, estimated_prep_time, 
                               delivery_address, special_instructions, delivery_datetime, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
             RETURNING id, order_date
-        ''', (customer_id, chef_id, total_amount, max_prep_time, delivery_address, special_instructions, delivery_datetime))
+        ''', (customer_id, guest_id, chef_id, total_amount, max_prep_time, delivery_address, special_instructions, delivery_datetime))
         
         order_result = cursor.fetchone()
         order_id = order_result[0]
@@ -148,6 +159,64 @@ def get_customer_orders(customer_id):
         print(f"Error fetching customer orders: {e}")
         return jsonify({'error': str(e)}), 500
 
+@order_bp.route('/guest/<int:guest_id>', methods=['GET'])
+def get_guest_orders(guest_id):
+    """Get all orders for a guest"""
+    try:
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('''
+            SELECT 
+                o.id as order_id,
+                o.order_date,
+                o.delivery_datetime,
+                o.status,
+                o.total_amount,
+                o.estimated_prep_time,
+                o.delivery_address,
+                o.special_instructions,
+                c.first_name as chef_first_name,
+                c.last_name as chef_last_name,
+                c.photo_url as chef_photo,
+                COUNT(oi.id) as item_count
+            FROM orders o
+            JOIN chefs c ON o.chef_id = c.id
+            LEFT JOIN order_items oi ON o.id = oi.order_id
+            WHERE o.guest_id = %s
+            GROUP BY o.id, o.order_date, o.delivery_datetime, o.status, o.total_amount, o.estimated_prep_time,
+                     o.delivery_address, o.special_instructions,
+                     c.first_name, c.last_name, c.photo_url
+            ORDER BY o.order_date DESC
+        ''', (guest_id,))
+
+        orders = cursor.fetchall()
+
+        formatted_orders = []
+        for order in orders:
+            formatted_order = dict(order)
+            if formatted_order.get('order_date'):
+                formatted_order['order_date'] = formatted_order['order_date'].isoformat()
+            if formatted_order.get('total_amount'):
+                formatted_order['total_amount'] = float(formatted_order['total_amount'])
+            if formatted_order.get('delivery_datetime'):
+                formatted_order['delivery_datetime'] = formatted_order['delivery_datetime'].isoformat()
+            formatted_order['chef_name'] = f"{formatted_order['chef_first_name']} {formatted_order['chef_last_name']}"
+            formatted_orders.append(formatted_order)
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'orders': formatted_orders,
+            'count': len(formatted_orders)
+        }), 200
+
+    except Exception as e:
+        print(f"Error fetching guest orders: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @order_bp.route('/chef/<int:chef_id>', methods=['GET'])
 def get_chef_orders(chef_id):
     """Get all orders for a chef"""
@@ -170,9 +239,13 @@ def get_chef_orders(chef_id):
                 cu.first_name as customer_first_name,
                 cu.last_name as customer_last_name,
                 cu.phone as customer_phone,
+                g.first_name as guest_first_name,
+                g.last_name as guest_last_name,
+                g.phone as guest_phone,
                 COUNT(oi.id) as item_count
             FROM orders o
-            JOIN customers cu ON o.customer_id = cu.id
+            LEFT JOIN customers cu ON o.customer_id = cu.id
+            LEFT JOIN guests g ON o.guest_id = g.id
             LEFT JOIN order_items oi ON o.id = oi.order_id
             WHERE o.chef_id = %s
         '''
@@ -186,7 +259,8 @@ def get_chef_orders(chef_id):
         query += '''
             GROUP BY o.id, o.order_date, o.delivery_datetime, o.status, o.total_amount, o.estimated_prep_time,
                      o.delivery_address, o.special_instructions,
-                     cu.first_name, cu.last_name, cu.phone
+                     cu.first_name, cu.last_name, cu.phone,
+                     g.first_name, g.last_name, g.phone
             ORDER BY o.order_date DESC
         '''
         
@@ -203,7 +277,10 @@ def get_chef_orders(chef_id):
                 formatted_order['delivery_datetime'] = formatted_order['delivery_datetime'].isoformat()
             if formatted_order.get('total_amount'):
                 formatted_order['total_amount'] = float(formatted_order['total_amount'])
-            formatted_order['customer_name'] = f"{formatted_order['customer_first_name']} {formatted_order['customer_last_name']}"
+            if formatted_order.get('customer_first_name'):
+                formatted_order['customer_name'] = f"{formatted_order['customer_first_name']} {formatted_order['customer_last_name']}"
+            else:
+                formatted_order['customer_name'] = f"{formatted_order.get('guest_first_name') or ''} {formatted_order.get('guest_last_name') or ''}".strip() or 'Guest'
             formatted_orders.append(formatted_order)
         
         cursor.close()
@@ -236,10 +313,14 @@ def get_order_details(order_id):
                 c.photo_url as chef_photo,
                 cu.first_name as customer_first_name,
                 cu.last_name as customer_last_name,
-                cu.phone as customer_phone
+                cu.phone as customer_phone,
+                g.first_name as guest_first_name,
+                g.last_name as guest_last_name,
+                g.phone as guest_phone
             FROM orders o
             JOIN chefs c ON o.chef_id = c.id
-            JOIN customers cu ON o.customer_id = cu.id
+            LEFT JOIN customers cu ON o.customer_id = cu.id
+            LEFT JOIN guests g ON o.guest_id = g.id
             WHERE o.id = %s
         ''', (order_id,))
         
