@@ -16,7 +16,7 @@ import '../global.css';
 enableScreens(true);
 SplashScreen.preventAutoHideAsync();
 
-const STRIPE_PUBLISHABLE_KEY = 'pk_test_51T6xl4ReDmkGCaoFu8ucjyz1aREa7oE7OjyKSxqOtnVWM6TE4agF20eBfbox6xNEqG70SCgYmO8b91HDhlUJ180900CyJNHk5r';
+const STRIPE_PUBLISHABLE_KEY = 'pk_test_51Tw7iOHafQUeyNJlOYQOVtxxwHwwpp1OCtjBBSIzMniDsNVYsbbW18CReVRMJIlRoePXJkY1hrFqUsb5gwOvPVxB00l3hT754D';
 const CREAM = '#fefce8';
 
 export default function RootLayout() {

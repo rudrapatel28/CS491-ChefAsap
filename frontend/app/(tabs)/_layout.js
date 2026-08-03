@@ -28,6 +28,7 @@ export default function TabLayout() {
     const router = useRouter();
 
     const [bookings, setBookings] = useState([]);
+    const [unreadMessageCount, setUnreadMessageCount] = useState(0);
 
 
     const [showCreateAccountModal, setShowCreateAccountModal] = useState(false);
@@ -102,6 +103,30 @@ export default function TabLayout() {
     ]);
 
 
+            const fetchUnreadMessages = async () => {
+                if (!profileId || !userType || !token) return;
+                try {
+                    const url = `${apiUrl}/api/chat/conversations?${userType}_id=${profileId}`;
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`,
+                        },
+                    });
+                    if (!response.ok) return;
+                    const data = await response.json();
+                    const unreadTotal = Array.isArray(data)
+                        ? data.reduce((total, conversation) => total + (Number(conversation.unread_count) || 0), 0)
+                        : 0;
+                    setUnreadMessageCount(unreadTotal);
+                } catch (err) {
+                    setUnreadMessageCount(0);
+                }
+            };
+            fetchUnreadMessages();
+        }
+    }, [isLoading, isAuthenticated, router, apiUrl, profileId, token, userType]);
 
     const iconSize = 24;
     const isIOS = Platform.OS === 'ios';
@@ -175,208 +200,34 @@ export default function TabLayout() {
                             onClose={() => setShowCreateAccountModal(false)}
                         />
 
-                    </View>
-
-                </Modal>
-
-
-                <Tabs screenOptions={tabBarOptions}>
-
-                    <Tabs.Screen
-                        name="SearchScreen"
-                        options={{
-                            title: "Search",
-                            tabBarIcon: ({ color }) =>
-                                <Octicons
-                                    name="search"
-                                    size={iconSize}
-                                    color={color}
-                                />,
-                        }}
-                    />
-
-                    <Tabs.Screen
-                        name="BookingsScreen"
-                        options={{
-                            title: "Bookings",
-                            tabBarIcon: ({ color }) =>
-                                <Octicons
-                                    name="calendar"
-                                    size={iconSize}
-                                    color={color}
-                                />,
-                            tabBarButton: (props) => (
-                                <TouchableOpacity
-                                    {...props}
-                                    onPress={(e) => {
-                                        e.preventDefault();
-                                        requireAccount();
-                                    }}
-                                />
-                            ),
-                        }}
-                    />
-
-                    <Tabs.Screen
-                        name="Messages"
-                        options={{
-                            title: "Messages",
-                            tabBarIcon: ({ color }) =>
-                                <Octicons
-                                    name="comment-discussion"
-                                    size={iconSize}
-                                    color={color}
-                                />,
-                            tabBarButton: (props) => (
-                                <TouchableOpacity
-                                    {...props}
-                                    onPress={(e) => {
-                                        e.preventDefault();
-                                        requireAccount();
-                                    }}
-                                />
-                            ),
-                        }}
-                    />
-
-                    <Tabs.Screen
-                        name="Profile"
-                        options={{
-                            title: "Profile",
-                            tabBarIcon: ({ color }) =>
-                                <Octicons
-                                    name="person"
-                                    size={iconSize}
-                                    color={color}
-                                />,
-                            tabBarButton: (props) => (
-                                <TouchableOpacity
-                                    {...props}
-                                    onPress={(e) => {
-                                        e.preventDefault();
-                                        requireAccount();
-                                    }}
-                                />
-                            ),
-                        }}
-                    />
-
-                </Tabs>
-
-            </View>
-
-        );
-
-    }
-
-    // ==========================
-    // CHEF TABS
-    // ==========================
-
-    if (userType === 'chef') {
-
-        return (
-
-            <View style={{ flex: 1, backgroundColor: CREAM }}>
-
-                <Modal
-                    visible={bookings.length > 0}
-                    animationType="fade"
-                    transparent={true}
-                >
-
-                    <View
-                        style={{
-                            backgroundColor: 'rgba(0,0,0,0.5)',
-                            flex: 1,
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}
-                    >
-
-                        {bookings.length > 0 &&
-                            <OrderConfirmationModal
-                                key={bookings[0].booking_id}
-                                onClose={() =>
-                                    setBookings(
-                                        bookings.filter(
-                                            b => b.booking_id !== bookings[0].booking_id
-                                        )
-                                    )
-                                }
-                                booking={bookings[0]}
-                            />
-                        }
-
-                    </View>
-
-                </Modal>
-
-
-                <Tabs screenOptions={tabBarOptions}>
-
-                    <Tabs.Screen
-                        name="BookingsScreen"
-                        options={{
-                            title: 'Bookings',
-                            tabBarIcon: ({ color }) =>
-                                <Octicons
-                                    name="calendar"
-                                    size={iconSize}
-                                    color={color}
-                                />,
-                        }}
-                    />
-
-
-                    <Tabs.Screen
-                        name="Messages"
-                        options={{
-                            title: 'Messages',
-                            tabBarIcon: ({ color }) =>
-                                <Octicons
-                                    name="comment-discussion"
-                                    size={iconSize}
-                                    color={color}
-                                />,
-                        }}
-                    />
-
-
-                    <Tabs.Screen
-                        name="Profile"
-                        options={{
-                            title: 'Profile',
-                            tabBarIcon: ({ color }) =>
-                                <Octicons
-                                    name="person"
-                                    size={iconSize}
-                                    color={color}
-                                />,
-                        }}
-                    />
-
-
-                    <Tabs.Screen
-                        name="SearchScreen"
-                        options={{
-                            href: null
-                        }}
-                    />
-
-                </Tabs>
-
-            </View>
-
-        );
-
-    }
-
-
-
-    // ==========================
-    // CUSTOMER TABS
-    // ==========================
+            <Tabs screenOptions={tabBarOptions}>
+                <Tabs.Screen
+                    name="BookingsScreen"
+                    options={{
+                        title: 'Bookings',
+                        tabBarIcon: ({ color }) => <Octicons name="calendar" size={iconSize} color={color} />,
+                    }}
+                />
+                <Tabs.Screen
+                    name="Messages"
+                    options={{
+                        title: 'Messages',
+                        tabBarIcon: ({ color }) => <Octicons name="comment-discussion" size={iconSize} color={color} />,
+                        tabBarBadge: unreadMessageCount > 0 ? unreadMessageCount : undefined,
+                        tabBarBadgeStyle: { backgroundColor: '#ef4444', color: '#ffffff', fontSize: 10 },
+                    }}
+                />
+                <Tabs.Screen
+                    name="Profile"
+                    options={{
+                        title: 'Profile',
+                        tabBarIcon: ({ color }) => <Octicons name="person" size={iconSize} color={color} />,
+                    }}
+                />
+                <Tabs.Screen name="SearchScreen" options={{ href: null }} />
+            </Tabs>
+        </View>
+    );
 
     return (
 
@@ -456,12 +307,9 @@ export default function TabLayout() {
                     name="Messages"
                     options={{
                         title: 'Messages',
-                        tabBarIcon: ({ color }) =>
-                            <Octicons
-                                name="comment-discussion"
-                                size={iconSize}
-                                color={color}
-                            />,
+                        tabBarIcon: ({ color }) => <Octicons name="comment-discussion" size={iconSize} color={color} />,
+                        tabBarBadge: unreadMessageCount > 0 ? unreadMessageCount : undefined,
+                        tabBarBadgeStyle: { backgroundColor: '#ef4444', color: '#ffffff', fontSize: 10 },
                     }}
                 />
 
