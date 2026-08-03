@@ -4,6 +4,7 @@ import { Alert, ScrollView, Text, TouchableOpacity, View, StyleSheet, TextInput 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CustomPicker from "../components/Picker";
 import getEnvVars from '../../config';
+import { useAuth } from '../context/AuthContext';
 
 const validatePassword = (password) => {
   const requirements = [
@@ -102,6 +103,7 @@ export default function Signup() {
   const [passwordRequirements, setPasswordRequirements] = useState([]);
   const router = useRouter();
   const { apiUrl } = getEnvVars();
+  const { setPendingVerification } = useAuth();
 
   const handleBack = () => {
     if (router.canGoBack()) { router.back(); return; }
@@ -126,7 +128,8 @@ export default function Signup() {
       });
       const data = await response.json();
       if (!response.ok) { Alert.alert('Error', data.error || 'Signup failed'); return; }
-      showAlert('Success', 'Account created successfully!', () => router.replace('/SignInScreen'));
+      setPendingVerification(email, 'signup');
+      router.push({ pathname: '/VerifyCodeScreen', params: { email, purpose: 'signup' } });
     } catch (error) {
       showAlert('Error', 'Network error: ' + error.message);
     }

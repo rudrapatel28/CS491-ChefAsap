@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Modal, View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { Modal, View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch } from "react-native";
 import { useAuth } from "./context/AuthContext";
 import getEnvVars from "../config";
 import * as ImagePicker from 'expo-image-picker';
@@ -68,7 +68,7 @@ const InfoRow = ({ label, value }) => (
 );
 
 export default function ProfileSettings() {
-  const { profileId, userType } = useAuth();
+  const { profileId, userType, userId } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { apiUrl } = getEnvVars();
@@ -79,6 +79,8 @@ export default function ProfileSettings() {
   const [editing, setEditing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
 
   const privateQuery = userType === 'chef' ? '?private=true' : '';
   const API_URL = `${apiUrl}/profile/${userType}/${profileId}${privateQuery}`;
@@ -93,6 +95,32 @@ export default function ProfileSettings() {
       })
       .catch(() => setError("Network error"));
   }, [profileId, API_URL]);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetch(`${apiUrl}/auth/2fa-settings?user_id=${userId}`)
+      .then(res => res.json())
+      .then(data => { if (!data.error) setTwoFactorEnabled(!!data.two_factor_enabled); })
+      .catch(() => {});
+  }, [userId]);
+
+  const handleToggle2FA = async (value) => {
+    setTwoFactorLoading(true);
+    try {
+      const res = await fetch(`${apiUrl}/auth/2fa-settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, enabled: value, method: "email" }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Failed to update 2FA setting"); return; }
+      setTwoFactorEnabled(data.two_factor_enabled);
+    } catch (e) {
+      alert("Network error updating 2FA setting");
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
 
   const handleChange = (field, value) => setForm({ ...form, [field]: value });
   const handleAddressChange = (field, value) => setForm({ ...form, full_address: { ...form.full_address, [field]: value } });
@@ -218,6 +246,27 @@ export default function ProfileSettings() {
               <Text style={s.changePhotoText}>{uploading ? "Uploading..." : "Tap to change profile picture"}</Text>
             )}
           </TouchableOpacity>
+        </SectionCard>
+
+        {/* Security */}
+        <SectionCard title="Security" icon="shield">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={s.securityLabel}>Two-Factor Authentication</Text>
+              <Text style={s.helperText}>
+                {twoFactorEnabled
+                  ? "We'll email you a code each time you sign in."
+                  : "Add an extra layer of security to your account."}
+              </Text>
+            </View>
+            <Switch
+              value={twoFactorEnabled}
+              onValueChange={handleToggle2FA}
+              disabled={twoFactorLoading}
+              trackColor={{ false: BORDER, true: GREEN_LIGHT }}
+              thumbColor={twoFactorEnabled ? GREEN : '#fff'}
+            />
+          </View>
         </SectionCard>
 
         {editing ? (
@@ -384,6 +433,8 @@ const s = StyleSheet.create({
     fontSize: 12, fontWeight: '700', color: TEXT_MID,
     textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6, marginTop: 8,
   },
+  securityLabel: { fontSize: 14, fontWeight: '700', color: TEXT, marginBottom: 4 },
+  helperText: { fontSize: 13, color: TEXT_SOFT, lineHeight: 18 },
   disabledField: {
     backgroundColor: '#f0f5f0', borderRadius: 12, borderWidth: 1, borderColor: BORDER,
     paddingHorizontal: 16, paddingVertical: 12, marginBottom: 8,

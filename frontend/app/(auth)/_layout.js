@@ -40,6 +40,10 @@ export default function AuthLayout() {
             />
 
             <Stack.Screen
+                name="VerifyCodeScreen"
+            />
+
+            <Stack.Screen
                 name="ForgetPasswordScreen"
             />
         </Stack>

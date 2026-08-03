@@ -136,6 +136,29 @@ def init_postgres_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_chef_id ON users(chef_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_customer_id ON users(customer_id)')
 
+        # 2FA / email verification columns
+        cursor.execute('''
+            ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS two_factor_method VARCHAR(10) CHECK (two_factor_method IN ('email', 'totp')),
+                ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(255)
+        ''')
+
+        # Verification codes (signup email verification + login 2FA)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS verification_codes (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                code_hash VARCHAR(255) NOT NULL,
+                purpose VARCHAR(20) NOT NULL CHECK (purpose IN ('signup', 'login_2fa', 'totp_enroll')),
+                expires_at TIMESTAMP NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_verification_codes_user ON verification_codes(user_id, purpose)')
+
         # Cuisine types
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS cuisine_types (

@@ -11,8 +11,11 @@ export const AuthContext = createContext({
     profileId: null,
     token: null,
     sessionId: null,
+    pendingVerification: null,
     login: async () => { },
     logout: async () => { },
+    setPendingVerification: () => { },
+    clearPendingVerification: () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -30,6 +33,9 @@ export function AuthProvider({ children}) {
     const [token, setToken] = useState(null);
     const [sessionId, setSessionId] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
+    // Distinct from isAuthenticated: set while a signup or 2FA login is
+    // waiting on an emailed/authenticator code, before a token exists.
+    const [pendingVerification, setPendingVerificationState] = useState(null);
     const router = useRouter();
 
     useEffect(() => {
@@ -100,6 +106,14 @@ export function AuthProvider({ children}) {
     };
 
 
+    const setPendingVerification = (email, purpose = 'signup') => {
+        setPendingVerificationState({ email, purpose });
+    };
+
+    const clearPendingVerification = () => {
+        setPendingVerificationState(null);
+    };
+
     const contextValue = {
         isAuthenticated,
         userType,
@@ -107,9 +121,12 @@ export function AuthProvider({ children}) {
         profileId,
         token,
         sessionId,
+        pendingVerification,
         login,
         logout,
         isLoading,
+        setPendingVerification,
+        clearPendingVerification,
     };
 
     return (

@@ -27,7 +27,15 @@ export default function Signin() {
       });
       const data = await response.json();
       if (!response.ok) {
+        if (data.error === 'account_not_verified') {
+          router.push({ pathname: '/VerifyCodeScreen', params: { email: data.email || email, purpose: 'signup' } });
+          return;
+        }
         Alert.alert('Sign In Failed', data.error || 'Please check your credentials.');
+        return;
+      }
+      if (data.requires_2fa) {
+        router.push({ pathname: '/VerifyCodeScreen', params: { email, purpose: 'login_2fa' } });
         return;
       }
       await login(data.token, data.user_type, data.user_id, data.profile_id);

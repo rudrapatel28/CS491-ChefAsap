@@ -9,6 +9,13 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.geocoding_service import geocoding_service
+from services.verification_service import (
+    create_verification_code,
+    verify_code,
+    get_active_code_row,
+    seconds_until_resend_allowed,
+)
+from services.email_service import send_verification_email
 
 def validate_email(email):
     email_regex = r'^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -80,8 +87,8 @@ def signup():
 
         # PostgreSQL: INSERT with RETURNING
         cursor.execute('''
-            INSERT INTO users (email, password, user_type)
-            VALUES (%s, %s, %s) RETURNING id
+            INSERT INTO users (email, password, user_type, is_verified)
+            VALUES (%s, %s, %s, FALSE) RETURNING id
         ''', (email, hashed_password, user_type))
         user_id = cursor.fetchone()['id']
         
@@ -142,25 +149,19 @@ def signup():
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (customer_id, address, address2, city, state, zip_code, latitude, longitude, True))
         
+        code = create_verification_code(cursor, user_id, 'signup')
         conn.commit()
-        
-        print(f'\nNew user signed up - Email: {email}, Type: {user_type}, ID: {user_id}\n')
 
-        print(f">>> Signing with JWT_SECRET: '{JWT_SECRET[:10]}...'")
+        print(f'\nNew user signed up (pending verification) - Email: {email}, Type: {user_type}, ID: {user_id}\n')
 
-        # Generate JWT token
-        token = jwt.encode({
-            'user_id': user_id,
-            'email': email,
-            'user_type': user_type,
-            'exp': datetime.utcnow() + timedelta(days=1)
-        }, JWT_SECRET, algorithm='HS256')
+        try:
+            send_verification_email(email, code, 'signup')
+        except Exception as email_err:
+            print(f'>>> Failed to send verification email: {email_err}')
 
-        print(f">>> Generated token: '{token[:30]}...'")
         return jsonify({
-            'message': 'User registered successfully',
-            'token': token,
-            'user_type': user_type
+            'message': 'Verification code sent to your email',
+            'email': email
         }), 201
 
     except Exception as e:
@@ -170,6 +171,114 @@ def signup():
             cursor.close()
         if conn:
             conn.close()
+
+@auth_bp.route('/verify-signup', methods=['POST'])
+def verify_signup():
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        code = (data.get('code') or '').strip()
+
+        if not email or not code:
+            return jsonify({'error': 'Email and code are required'}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('SELECT id, user_type, chef_id, customer_id, is_verified FROM users WHERE email = %s', (email,))
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if user['is_verified']:
+            return jsonify({'error': 'Account already verified'}), 400
+
+        ok, error = verify_code(cursor, user['id'], 'signup', code)
+        if not ok:
+            conn.commit()  # persist the attempt increment, if any
+            status = 429 if error == 'too_many_attempts' else 400
+            return jsonify({'error': error}), status
+
+        cursor.execute('UPDATE users SET is_verified = TRUE WHERE id = %s', (user['id'],))
+        conn.commit()
+
+        token = jwt.encode({
+            'user_id': user['id'],
+            'email': email,
+            'user_type': user['user_type'],
+            'exp': datetime.utcnow() + timedelta(days=1)
+        }, JWT_SECRET, algorithm='HS256')
+
+        profile_id = user['chef_id'] if user['user_type'] == 'chef' else user['customer_id']
+
+        return jsonify({
+            'message': 'Account verified successfully',
+            'token': token,
+            'user_type': user['user_type'],
+            'user_id': user['id'],
+            'profile_id': profile_id
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@auth_bp.route('/resend-code', methods=['POST'])
+def resend_code():
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        purpose = data.get('purpose', 'signup')
+
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+        if purpose not in ('signup', 'login_2fa'):
+            return jsonify({'error': 'Invalid purpose'}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('SELECT id, is_verified FROM users WHERE email = %s', (email,))
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if purpose == 'signup' and user['is_verified']:
+            return jsonify({'error': 'Account already verified'}), 400
+
+        existing = get_active_code_row(cursor, user['id'], purpose)
+        wait = seconds_until_resend_allowed(existing)
+        if wait > 0:
+            return jsonify({'error': 'cooldown', 'retry_after_seconds': wait}), 429
+
+        code = create_verification_code(cursor, user['id'], purpose)
+        conn.commit()
+
+        try:
+            send_verification_email(email, code, purpose)
+        except Exception as email_err:
+            print(f'>>> Failed to resend verification email: {email_err}')
+            return jsonify({'error': 'Failed to send email, please try again'}), 502
+
+        return jsonify({'message': 'Code resent'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
 
 @auth_bp.route('/signin', methods=['POST'])
 def signin():
@@ -211,6 +320,21 @@ def signin():
         if not user or not bcrypt.check_password_hash(user['password'], password):
             return jsonify({'error': 'Invalid email or password'}), 401
 
+        if not user['is_verified']:
+            return jsonify({'error': 'account_not_verified', 'email': user['email']}), 403
+
+        if user['two_factor_enabled']:
+            code = create_verification_code(cursor, user['id'], 'login_2fa')
+            conn.commit()
+            try:
+                send_verification_email(user['email'], code, 'login_2fa')
+            except Exception as email_err:
+                print(f'>>> Failed to send 2FA login email: {email_err}')
+            return jsonify({
+                'requires_2fa': True,
+                'method': user['two_factor_method'] or 'email'
+            }), 200
+
         # Generate JWT token
         token = jwt.encode({
             'user_id': user['id'],
@@ -235,6 +359,145 @@ def signin():
         print(f'Response data: {response_data}')
         
         return jsonify(response_data), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@auth_bp.route('/verify-2fa', methods=['POST'])
+def verify_2fa():
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        code = (data.get('code') or '').strip()
+
+        if not email or not code:
+            return jsonify({'error': 'Email and code are required'}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute(
+            'SELECT id, user_type, chef_id, customer_id, two_factor_enabled FROM users WHERE email = %s',
+            (email,)
+        )
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if not user['two_factor_enabled']:
+            return jsonify({'error': '2FA is not enabled for this account'}), 400
+
+        ok, error = verify_code(cursor, user['id'], 'login_2fa', code)
+        if not ok:
+            conn.commit()  # persist the attempt increment, if any
+            status = 429 if error == 'too_many_attempts' else 400
+            return jsonify({'error': error}), status
+
+        conn.commit()
+
+        token = jwt.encode({
+            'user_id': user['id'],
+            'email': email,
+            'user_type': user['user_type'],
+            'exp': datetime.utcnow() + timedelta(days=1)
+        }, JWT_SECRET, algorithm='HS256')
+
+        profile_id = user['chef_id'] if user['user_type'] == 'chef' else user['customer_id']
+
+        return jsonify({
+            'message': 'Login successful',
+            'token': token,
+            'user_type': user['user_type'],
+            'user_id': user['id'],
+            'profile_id': profile_id
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@auth_bp.route('/2fa-settings', methods=['GET'])
+def get_2fa_settings():
+    conn = None
+    cursor = None
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'user_id is required'}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+        cursor.execute('SELECT two_factor_enabled, two_factor_method FROM users WHERE id = %s', (user_id,))
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        return jsonify({
+            'two_factor_enabled': user['two_factor_enabled'],
+            'two_factor_method': user['two_factor_method']
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@auth_bp.route('/2fa-settings', methods=['PATCH'])
+def update_2fa_settings():
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('user_id')
+        enabled = data.get('enabled')
+
+        if not user_id or enabled is None:
+            return jsonify({'error': 'user_id and enabled are required'}), 400
+
+        method = data.get('method', 'email')
+        if enabled and method != 'email':
+            return jsonify({'error': 'Only the email method is currently supported'}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('SELECT id FROM users WHERE id = %s', (user_id,))
+        if not cursor.fetchone():
+            return jsonify({'error': 'User not found'}), 404
+
+        if enabled:
+            cursor.execute(
+                'UPDATE users SET two_factor_enabled = TRUE, two_factor_method = %s WHERE id = %s',
+                (method, user_id)
+            )
+        else:
+            cursor.execute(
+                'UPDATE users SET two_factor_enabled = FALSE, two_factor_method = NULL WHERE id = %s',
+                (user_id,)
+            )
+        conn.commit()
+
+        return jsonify({
+            'two_factor_enabled': bool(enabled),
+            'two_factor_method': method if enabled else None
+        }), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
