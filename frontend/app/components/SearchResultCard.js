@@ -158,13 +158,22 @@ export default function SearchResultCard({
 
 
                         ) : (
-
-                            <ProfilePicture
-                                photoUrl={photoData}
-                                firstName={first_name}
-                                lastName={last_name}
-                                size={48}
-                            />
+                            <View
+                                style={{
+                                    width: 48,
+                                    height: 48,
+                                    borderRadius: 24,
+                                    overflow: 'hidden',
+                                    flexShrink: 0,
+                                }}
+                            >
+                                <ProfilePicture
+                                    photoUrl={photoData}
+                                    firstName={first_name}
+                                    lastName={last_name}
+                                    size={48}
+                                />
+                            </View>
 
                         )
 

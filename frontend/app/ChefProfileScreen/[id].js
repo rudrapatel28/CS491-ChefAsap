@@ -254,7 +254,9 @@ export default function ChefProfileScreen() {
                             photoUrl={chefData?.photo_url}
                             firstName={chefData?.first_name}
                             lastName={chefData?.last_name}
+                            size={128}
                         />
+
                         <Text style={s.chefName}>
                             {chefData?.first_name} {chefData?.last_name}
                         </Text>
@@ -319,11 +321,7 @@ export default function ChefProfileScreen() {
                     <View style={s.sectionHeader}>
                         <Text style={s.sectionTitle}>Featured Dishes</Text>
                     </View>
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{ padding: 12, gap: 12 }}
-                    >
+                    <View style={{ flexDirection: 'row', padding: 12, gap: 12 }}>
                         {featuredItems.length > 0 ? (
                             featuredItems.map(item => (
                                 <FeaturedDishCard key={item.id} item={item} apiUrl={apiUrl} />
@@ -331,7 +329,7 @@ export default function ChefProfileScreen() {
                         ) : (
                             <Text style={[s.emptyText, { padding: 8 }]}>No featured dishes available</Text>
                         )}
-                    </ScrollView>
+                    </View>
                 </View>
 
                 {/* Actions */}

@@ -397,12 +397,17 @@ export default function SearchScreen() {
             <Card
                 title="Nearby Chefs"
                 headerIcon="location"
+                isScrollable={true}
+                scrollDirection="vertical"
             >
-                
                 {loading ? (
-                    <LoadingIcon icon='food' size={64} message='Fetching Nearby Chefs...' />
+                    <LoadingIcon
+                        icon="food"
+                        size={64}
+                        message="Fetching Nearby Chefs..."
+                    />
                 ) : searchResults.length !== 0 ? (
-                    searchResults.map((result, index) =>
+                    searchResults.map((result, index) => (
                         <SearchResultCard
                             key={index}
                             chef_id={result.chef_id}
@@ -415,13 +420,14 @@ export default function SearchScreen() {
                             review_count={result.review_count}
                             hourly_rate={result.hourly_rate}
                         />
-                    )
+                    ))
                 ) : (
                     <Text style={{ textAlign: 'center', padding: 20, color: '#8aab8a' }}>
                         No chefs found nearby.
                     </Text>
                 )}
             </Card>
+
             {isGuestBrowsing && (
                 <TouchableOpacity
                     onPress={exitGuestMode}

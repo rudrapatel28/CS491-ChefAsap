@@ -1,4 +1,4 @@
-import { View, Text, Image, StyleSheet } from "react-native";
+import { View, Text, Image } from "react-native";
 import getEnvVars from "../../config";
 
 const GREEN = '#2d6a4f';
@@ -8,22 +8,24 @@ export default function ProfilePicture({
     photoUrl = '',
     firstName = '',
     lastName = '',
-    size = 32,
-    customClasses = '',
+    size = 128,
 }) {
     const { apiUrl } = getEnvVars();
-    const diameter = size * 4;
-    const borderWidth = Math.max(2, size / 8);
-    const fontSize = size * 1.5;
-    const initials = `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase();
 
-    // Handle base64, full URLs, and relative paths
+    const diameter = size;
+    const borderWidth = Math.max(2, size / 16);
+    const fontSize = size * 0.35;
+
+    const initials =
+        `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase();
+
     const getImageUri = () => {
         if (!photoUrl) return null;
-        if (photoUrl.startsWith('data:')) return photoUrl;          // base64
-        if (photoUrl.startsWith('http')) return photoUrl;           // full URL
-        if (photoUrl.startsWith('/static/')) return null;           // old broken path
-        return `${apiUrl}${photoUrl}`;                              // relative path
+        if (photoUrl.startsWith('data:')) return photoUrl;
+        if (photoUrl.startsWith('http')) return photoUrl;
+        if (photoUrl.startsWith('/static/')) return null;
+
+        return `${apiUrl}${photoUrl}`;
     };
 
     const imageUri = getImageUri();
@@ -41,7 +43,6 @@ export default function ProfilePicture({
                         borderColor: GREEN_LIGHT,
                     }}
                     resizeMode="cover"
-                    onError={() => {}}
                 />
             ) : (
                 <View
@@ -56,7 +57,13 @@ export default function ProfilePicture({
                         justifyContent: 'center',
                     }}
                 >
-                    <Text style={{ fontSize, fontWeight: '700', color: GREEN, letterSpacing: 1 }}>
+                    <Text
+                        style={{
+                            fontSize,
+                            fontWeight: '700',
+                            color: GREEN,
+                        }}
+                    >
                         {initials}
                     </Text>
                 </View>
