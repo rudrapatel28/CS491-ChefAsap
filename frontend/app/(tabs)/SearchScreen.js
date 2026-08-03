@@ -386,14 +386,10 @@ export default function SearchScreen() {
             {/* AI Event Planner banner */}
             <PlannerBanner
                 onPress={() => {
-                    if (isGuestBrowsing) {
-                        requireAccount();
-                    } else {
-                        router.push('/MenuPlannerScreen');
-                    }
+                    router.push('/MenuPlannerScreen');
                 }}
             />
-
+            
             <Card
                 title="Nearby Chefs"
                 headerIcon="location"
