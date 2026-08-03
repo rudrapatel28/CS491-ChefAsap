@@ -1,4 +1,3 @@
-import token
 
 from flask import Blueprint, request, jsonify
 from database.db_helper import get_db_connection, get_cursor, handle_db_error
@@ -54,7 +53,7 @@ def token_required(f):
         except jwt.ExpiredSignatureError:
             print(">>> EXPIRED TOKEN")
             return jsonify({'error': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
+        except jwt.InvalidTokenError as e:
             print(f">>> INVALID TOKEN ERROR: {e}")
             return jsonify({'error': 'Invalid token'}), 401
         
@@ -128,11 +127,7 @@ def create_stripe_customer(current_user_id, user_type, customer_id):
     except Exception as e:
         print(f"Stripe error: {str(e)}")
         return jsonify({'error': f'Stripe error: {str(e)}'}), 400
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        print(f"Error creating Stripe customer: {str(e)}")
-        return handle_db_error(e)
+    
     finally:
         if cursor:
             cursor.close()
@@ -296,9 +291,7 @@ def get_payment_methods(current_user_id, user_type, customer_id):
     except Exception as e:
         print(f"Stripe error: {str(e)}")
         return jsonify({'error': f'Stripe error: {str(e)}'}), 400
-    except Exception as e:
-        print(f"Error getting payment methods: {str(e)}")
-        return handle_db_error(e)
+    
     finally:
         if cursor:
             cursor.close()
@@ -501,9 +494,7 @@ def attach_payment_method(current_user_id, user_type, customer_id):
     except Exception as e:
         print(f"Stripe error: {str(e)}")
         return jsonify({'error': f'Stripe error: {str(e)}'}), 400
-    except Exception as e:
-        print(f"Error attaching payment method: {str(e)}")
-        return handle_db_error(e)
+    
     finally:
         if cursor:
             cursor.close()
@@ -533,11 +524,7 @@ def detach_payment_method_no_auth(payment_method_id):
     except Exception as e:
         print(f"Stripe error: {str(e)}")
         return jsonify({'error': f'Stripe error: {str(e)}'}), 400
-    except Exception as e:
-        print(f"Error detaching payment method: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    
 
 @stripe_payment_bp.route('/payment-methods/<payment_method_id>/set-default', methods=['POST'])
 def set_default_payment_method_no_auth(payment_method_id):
@@ -598,11 +585,7 @@ def set_default_payment_method_no_auth(payment_method_id):
     except Exception as e:
         print(f"Stripe error: {str(e)}")
         return jsonify({'error': f'Stripe error: {str(e)}'}), 400
-    except Exception as e:
-        print(f"Error setting default payment method: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    
     finally:
         if cursor:
             cursor.close()
