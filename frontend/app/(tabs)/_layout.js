@@ -102,7 +102,8 @@ export default function TabLayout() {
         userType
     ]);
 
-
+    useEffect(() => {
+        if (!isLoading && isAuthenticated) {
             const fetchUnreadMessages = async () => {
                 if (!profileId || !userType || !token) return;
                 try {
@@ -200,34 +201,39 @@ export default function TabLayout() {
                             onClose={() => setShowCreateAccountModal(false)}
                         />
 
-            <Tabs screenOptions={tabBarOptions}>
-                <Tabs.Screen
-                    name="BookingsScreen"
-                    options={{
-                        title: 'Bookings',
-                        tabBarIcon: ({ color }) => <Octicons name="calendar" size={iconSize} color={color} />,
-                    }}
-                />
-                <Tabs.Screen
-                    name="Messages"
-                    options={{
-                        title: 'Messages',
-                        tabBarIcon: ({ color }) => <Octicons name="comment-discussion" size={iconSize} color={color} />,
-                        tabBarBadge: unreadMessageCount > 0 ? unreadMessageCount : undefined,
-                        tabBarBadgeStyle: { backgroundColor: '#ef4444', color: '#ffffff', fontSize: 10 },
-                    }}
-                />
-                <Tabs.Screen
-                    name="Profile"
-                    options={{
-                        title: 'Profile',
-                        tabBarIcon: ({ color }) => <Octicons name="person" size={iconSize} color={color} />,
-                    }}
-                />
-                <Tabs.Screen name="SearchScreen" options={{ href: null }} />
-            </Tabs>
-        </View>
-    );
+                    </View>
+
+                </Modal>
+
+                <Tabs screenOptions={tabBarOptions}>
+                    <Tabs.Screen
+                        name="BookingsScreen"
+                        options={{
+                            title: 'Bookings',
+                            tabBarIcon: ({ color }) => <Octicons name="calendar" size={iconSize} color={color} />,
+                        }}
+                    />
+                    <Tabs.Screen
+                        name="Messages"
+                        options={{
+                            title: 'Messages',
+                            tabBarIcon: ({ color }) => <Octicons name="comment-discussion" size={iconSize} color={color} />,
+                            tabBarBadge: unreadMessageCount > 0 ? unreadMessageCount : undefined,
+                            tabBarBadgeStyle: { backgroundColor: '#ef4444', color: '#ffffff', fontSize: 10 },
+                        }}
+                    />
+                    <Tabs.Screen
+                        name="Profile"
+                        options={{
+                            title: 'Profile',
+                            tabBarIcon: ({ color }) => <Octicons name="person" size={iconSize} color={color} />,
+                        }}
+                    />
+                    <Tabs.Screen name="SearchScreen" options={{ href: null }} />
+                </Tabs>
+            </View>
+        );
+    }
 
     return (
 
