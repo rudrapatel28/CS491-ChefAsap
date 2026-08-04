@@ -23,7 +23,9 @@ const TEXT_SOFT = '#8aab8a';
 const getImageSource = (photoUrl, apiUrl) => {
     if (!photoUrl) return null;
     if (photoUrl.startsWith('data:')) return { uri: photoUrl };
-    return { uri: `${apiUrl}${photoUrl}` };
+    return {
+        uri: `${apiUrl.replace(/\/$/, '')}/${photoUrl.replace(/^\//, '')}`
+    };
 };
 
 const FeaturedDishCard = ({ item, apiUrl }) => {
@@ -39,7 +41,7 @@ const FeaturedDishCard = ({ item, apiUrl }) => {
             )}
             <Text style={s.dishName}>{item.dish_name}</Text>
             {item.description ? <Text style={s.dishDesc}>{item.description}</Text> : null}
-            {item.price ? <Text style={s.dishPrice}>${item.price.toFixed(2)}</Text> : null}
+            {item.price ? <Text style={s.dishPrice}> ${Number(item.price).toFixed(2)}</Text> : null}
             {item.prep_time ? <Text style={s.dishMeta}>Prep time: {item.prep_time} min</Text> : null}
         </View>
     );
@@ -47,9 +49,32 @@ const FeaturedDishCard = ({ item, apiUrl }) => {
 
 export default function ChefProfileScreen() {
     const { id, distance } = useLocalSearchParams();
-    const { token, userId, profileId, userType } = useAuth();
+    const {
+        token,
+        userId,
+        profileId,
+        userType,
+        isGuestBrowsing,
+    } = useAuth();
     const { apiUrl } = getEnvVars();
     const router = useRouter();
+
+    const requireAccount = () => {
+        Alert.alert(
+            "Account Required",
+            "Create an account to chat with chefs, book experiences, and save favorites.",
+            [
+                {
+                    text: "Not Now",
+                    style: "cancel",
+                },
+                {
+                    text: "Create Account",
+                    onPress: () => router.replace("/(auth)"),
+                },
+            ]
+        );
+    };
 
     const [chefData, setChefData] = useState(null);
     const [featuredItems, setFeaturedItems] = useState([]);
@@ -87,20 +112,34 @@ export default function ChefProfileScreen() {
                 const featuredData = await featuredResponse.json();
                 if (featuredResponse.ok) setFeaturedItems(featuredData.featured_items || []);
 
-                const faveResponse = await fetch(`${apiUrl}/booking/customer/${profileId}/favorite-chefs/${chefId}`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                });
-                const faveData = await faveResponse.json();
-                if (faveResponse.ok) setIsFavorited(faveData.is_favorited || false);
+                if (!isGuestBrowsing && profileId) {
+                    const faveResponse = await fetch(
+                        `${apiUrl}/booking/customer/${profileId}/favorite-chefs/${chefId}`,
+                        {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`,
+                            },
+                        }
+                    );
+
+                    const faveData = await faveResponse.json();
+
+                    if (faveResponse.ok) {
+                        setIsFavorited(faveData.is_favorited || false);
+                    }
+                }
+
+
 
                 if (userType === 'customer' && profileId) {
                     await fetch(`${apiUrl}/search/viewed-chefs/${profileId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ chef_id: chefId }),
-                    }).catch(() => {});
-                    
+                    }).catch(() => { });
+
                     console.log('Analytics firing with profileId:', profileId, 'userId:', userId);
                     logAppEvent({
                         token,
@@ -120,9 +159,23 @@ export default function ChefProfileScreen() {
             }
         };
         fetchData();
-    }, [id, apiUrl, token]);
+    }, [
+        id,
+        apiUrl,
+        token,
+        isGuestBrowsing,
+        profileId,
+        userType,
+        userId
+    ]);
 
     const handleFavoriting = async () => {
+
+        if (isGuestBrowsing) {
+            requireAccount();
+            return;
+        }
+
         const chefId = parseInt(id, 10);
         setUpdatingFavoriteStatus(true);
         try {
@@ -139,10 +192,23 @@ export default function ChefProfileScreen() {
     };
 
     const handleChatPress = () => {
-        if (userType !== 'customer') { Alert.alert('Error', 'Only customers can message chefs.'); return; }
+
+        if (isGuestBrowsing) {
+            requireAccount();
+            return;
+        }
+
+        if (userType !== 'customer') {
+            Alert.alert('Error', 'Only customers can message chefs.');
+            return;
+        }
+
         router.push({
             pathname: '/ChatScreen',
-            params: { otherUserId: id, otherUserName: `${chefData?.first_name} ${chefData?.last_name}` },
+            params: {
+                otherUserId: id,
+                otherUserName: `${chefData?.first_name} ${chefData?.last_name}`,
+            },
         });
     };
 
@@ -164,14 +230,20 @@ export default function ChefProfileScreen() {
 
                 {/* Hero Card */}
                 <View style={s.card}>
-                    {/* Favorite button */}
+
                     <TouchableOpacity
                         onPress={handleFavoriting}
                         disabled={updatingFavoriteStatus}
                         style={s.favoriteBtn}
                     >
                         <Octicons
-                            name={updatingFavoriteStatus ? 'sync' : isFavorited ? 'heart-fill' : 'heart'}
+                            name={
+                                updatingFavoriteStatus
+                                    ? 'sync'
+                                    : isFavorited
+                                        ? 'heart-fill'
+                                        : 'heart'
+                            }
                             size={20}
                             color={isFavorited ? '#ef4444' : GREEN}
                         />
@@ -182,7 +254,9 @@ export default function ChefProfileScreen() {
                             photoUrl={chefData?.photo_url}
                             firstName={chefData?.first_name}
                             lastName={chefData?.last_name}
+                            size={128}
                         />
+
                         <Text style={s.chefName}>
                             {chefData?.first_name} {chefData?.last_name}
                         </Text>
@@ -247,11 +321,7 @@ export default function ChefProfileScreen() {
                     <View style={s.sectionHeader}>
                         <Text style={s.sectionTitle}>Featured Dishes</Text>
                     </View>
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{ padding: 12, gap: 12 }}
-                    >
+                    <View style={{ flexDirection: 'row', padding: 12, gap: 12 }}>
                         {featuredItems.length > 0 ? (
                             featuredItems.map(item => (
                                 <FeaturedDishCard key={item.id} item={item} apiUrl={apiUrl} />
@@ -259,7 +329,7 @@ export default function ChefProfileScreen() {
                         ) : (
                             <Text style={[s.emptyText, { padding: 8 }]}>No featured dishes available</Text>
                         )}
-                    </ScrollView>
+                    </View>
                 </View>
 
                 {/* Actions */}
@@ -276,7 +346,7 @@ export default function ChefProfileScreen() {
                     <Text style={s.secondaryBtnText}>← Return</Text>
                 </TouchableOpacity>
 
-            </ScrollView>
+            </ScrollView >
         </>
     );
 }

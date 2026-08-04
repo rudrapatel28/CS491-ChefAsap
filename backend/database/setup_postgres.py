@@ -336,6 +336,23 @@ def init_postgres_db():
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_customers_stripe_id ON customers(stripe_customer_id)')
 
+        # Guests table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS guests (
+                id SERIAL PRIMARY KEY,
+                guest_code VARCHAR(36) NOT NULL UNIQUE,
+                first_name VARCHAR(50),
+                last_name VARCHAR(50),
+                email VARCHAR(100),
+                phone VARCHAR(20),
+                stripe_customer_id VARCHAR(255) UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_guests_email ON guests(email)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_guests_phone ON guests(phone)')
+
         # Customer addresses
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS customer_addresses (
@@ -400,7 +417,8 @@ def init_postgres_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bookings (
                 id SERIAL PRIMARY KEY,
-                customer_id INTEGER NOT NULL,
+                customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+                guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
                 chef_id INTEGER,
                 cuisine_type VARCHAR(50) NOT NULL,
                 meal_type VARCHAR(20) NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'any')),
@@ -429,10 +447,35 @@ def init_postgres_db():
                 customer_review BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY (chef_id) REFERENCES users(id) ON DELETE SET NULL
+                FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+                FOREIGN KEY (guest_id) REFERENCES guests(id) ON DELETE SET NULL,
+                FOREIGN KEY (chef_id) REFERENCES chefs(id) ON DELETE SET NULL
             )
         ''')
+
+        cursor.execute('''
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'bookings' AND column_name = 'guest_id'
+                ) THEN
+                    ALTER TABLE bookings ADD COLUMN guest_id INTEGER;
+                END IF;
+            END $$;
+        ''')
+        cursor.execute('''
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'bookings' AND column_name = 'customer_id' AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE bookings ALTER COLUMN customer_id DROP NOT NULL;
+                END IF;
+            END $$;
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_bookings_guest ON bookings(guest_id)')
 
         # Booking status history
         cursor.execute('''
@@ -949,7 +992,8 @@ def init_postgres_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS orders (
                 id SERIAL PRIMARY KEY,
-                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+                guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
                 chef_id INTEGER NOT NULL REFERENCES chefs(id) ON DELETE CASCADE,
                 order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 delivery_datetime TIMESTAMP,
@@ -962,6 +1006,29 @@ def init_postgres_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 CONSTRAINT valid_status CHECK (status IN ('pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'))
             )
+        ''')
+
+        cursor.execute('''
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'orders' AND column_name = 'guest_id'
+                ) THEN
+                    ALTER TABLE orders ADD COLUMN guest_id INTEGER;
+                END IF;
+            END $$;
+        ''')
+        cursor.execute('''
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'orders' AND column_name = 'customer_id' AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE orders ALTER COLUMN customer_id DROP NOT NULL;
+                END IF;
+            END $$;
         ''')
         
         # Add delivery_datetime column if it doesn't exist (for existing orders tables)
@@ -978,6 +1045,7 @@ def init_postgres_db():
         ''')
         
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_guest ON orders(guest_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_chef ON orders(chef_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date DESC)')

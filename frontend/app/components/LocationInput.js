@@ -46,14 +46,18 @@ export default function LocationInput({ formData, setFormData }) {
 
     useEffect(() => {
         const loadLocation = async () => {
-            const storedLocation = await AsyncStorage.getItem('last-used-location');
+            if (!formData.profileId) return;
+
+            const storedLocation = await AsyncStorage.getItem(
+                `last-used-location-${formData.profileId}`
+            );
+
             if (storedLocation) {
                 setAddressInput(storedLocation);
                 geocodeAddress(storedLocation);
-            } else {
-                getCurrentLocation();
             }
         };
+
         loadLocation();
     }, []);
 
@@ -98,42 +102,14 @@ export default function LocationInput({ formData, setFormData }) {
     }, [formData.latitude, formData.longitude, formData.locationDisplayLine]);
 
     const updateSavedLocation = async (newLocation) => {
-        await AsyncStorage.setItem('last-used-location', newLocation);
+        if (!formData.profileId) return;
+
+        const key = `last-used-location-${formData.profileId}`;
+        await AsyncStorage.setItem(key, newLocation);
     };
 
-    const getCurrentLocation = async () => {
-        setLoading(true);
-        try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                // Don't alert — user will enter manually
-                return;
-            }
 
-            const location = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Balanced,
-                timeout: 10000,
-                maximumAge: 10000,
-            });
-            const { latitude, longitude } = location.coords;
-
-            const reverseGeo = await Location.reverseGeocodeAsync({ latitude, longitude });
-            const primaryAddress = reverseGeo[0];
-            const { displayLine, postalCode, fullAddress } = buildDisplayFromPlacemark(primaryAddress);
-
-            setAddressInput(fullAddress);
-            mergeLocation(latitude, longitude, { fullAddress, displayLine, postalCode });
-            await updateSavedLocation(fullAddress);
-            setSelection({ start: 0, end: 0 });
-            setIsEditing(false);
-        } catch (err) {
-            // Silently handle location unavailable — user can enter address manually
-            console.warn('GPS unavailable:', err?.message || err);
-            // Only show alert if user explicitly tapped the GPS button (not on auto-load)
-        } finally {
-            setLoading(false);
-        }
-    };
+   
 
     const getCurrentLocationManual = async () => {
         setLoading(true);

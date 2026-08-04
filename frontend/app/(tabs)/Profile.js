@@ -1,6 +1,6 @@
 import React from 'react';
 import { useEffect, useState } from "react";
-import { useRouter, useFocusEffect  } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { ScrollView, Text, View, Alert, TouchableOpacity, StyleSheet } from "react-native";
 
 import getEnvVars from "../../config";
@@ -48,33 +48,33 @@ export default function ProfileScreen() {
 
     useFocusEffect(
         React.useCallback(() => {
-        const fetchProfile = async () => {
-            if (!userId || !token || !userType || !profileId) return;
-            setLoading(true);
-            setError(null);
-            try {
-                const url = `${apiUrl}/profile/${userType}/${profileId}`;
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                });
-                const data = await response.json();
-                if (response.ok) {
-                    setProfileData(data.profile);
-                    setAboutText(data.profile.description || '');
-                    setSelectedCuisines(data.profile.cuisines || []);
-                    setSelectedMealTimings(data.profile.meal_timings || ['Breakfast', 'Lunch', 'Dinner']);
-                } else {
-                    setError(data.error || 'Failed to load profile.');
+            const fetchProfile = async () => {
+                if (!userId || !token || !userType || !profileId) return;
+                setLoading(true);
+                setError(null);
+                try {
+                    const url = `${apiUrl}/profile/${userType}/${profileId}`;
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        setProfileData(data.profile);
+                        setAboutText(data.profile.description || '');
+                        setSelectedCuisines(data.profile.cuisines || []);
+                        setSelectedMealTimings(data.profile.meal_timings || ['Breakfast', 'Lunch', 'Dinner']);
+                    } else {
+                        setError(data.error || 'Failed to load profile.');
+                    }
+                } catch (err) {
+                    setError(`Network error: ${err.message}`);
+                } finally {
+                    setLoading(false);
                 }
-            } catch (err) {
-                setError(`Network error: ${err.message}`);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchProfile();
-    }, [profileId, userId, userType, token, apiUrl])
+            };
+            fetchProfile();
+        }, [profileId, userId, userType, token, apiUrl])
     );
 
     useEffect(() => {
@@ -87,7 +87,7 @@ export default function ProfileScreen() {
                 });
                 const data = await response.json();
                 if (response.ok) setAllCuisines(data.cuisines || []);
-            } catch (error) {}
+            } catch (error) { }
         };
         fetchCuisines();
     }, [userType, apiUrl, token]);
@@ -103,7 +103,7 @@ export default function ProfileScreen() {
                 });
                 const data = await response.json();
                 if (response.ok) setPaymentMethods(data.payment_methods || []);
-            } catch (error) {}
+            } catch (error) { }
             finally { setLoadingPaymentMethods(false); }
         };
         fetchPaymentMethods();
@@ -149,7 +149,7 @@ export default function ProfileScreen() {
             } else {
                 Alert.alert('Error', data.error || 'Failed to set default');
             }
-        } catch (error) {}
+        } catch (error) { }
     };
 
     const refreshPaymentMethods = async () => {
@@ -161,7 +161,7 @@ export default function ProfileScreen() {
             });
             const data = await response.json();
             if (response.ok) setPaymentMethods(data.payment_methods || []);
-        } catch (error) {}
+        } catch (error) { }
         finally { setLoadingPaymentMethods(false); }
     };
 
@@ -263,6 +263,7 @@ export default function ProfileScreen() {
                         photoUrl={profileData?.photo_url}
                         firstName={profileData?.first_name}
                         lastName={profileData?.last_name}
+                        size={128}
                     />
                     <Text style={s.profileName}>
                         {profileData?.first_name?.toUpperCase()} {profileData?.last_name?.toUpperCase()}
