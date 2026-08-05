@@ -7,6 +7,7 @@ import os
 import stripe
 
 from services.fraud_service import FraudDetectionEngine
+from services.email_service import send_booking_confirmation_email
 import json
 # Create the blueprint
 stripe_payment_bp = Blueprint('stripe_payment', __name__)
@@ -914,7 +915,25 @@ def create_payment_intent(current_user_id, user_type):
         
         payment_intent = stripe.PaymentIntent.create(**intent_params)
         print(f"✅ Success! Payment Intent created: {payment_intent.id}")
-        
+
+        if payment_intent.status == 'succeeded':
+            try:
+                cursor.execute('''
+                    SELECT b.booking_date, b.booking_time, b.number_of_people, b.special_notes,
+                           b.total_cost, b.base_price, b.dynamic_price,
+                           cu.email AS customer_email,
+                           ch.first_name AS chef_first_name, ch.last_name AS chef_last_name
+                    FROM bookings b
+                    JOIN customers cu ON cu.id = b.customer_id
+                    LEFT JOIN chefs ch ON ch.id = b.chef_id
+                    WHERE b.id = %s
+                ''', (booking_id,))
+                receipt = cursor.fetchone()
+                if receipt and receipt.get('customer_email'):
+                    send_booking_confirmation_email(receipt['customer_email'], receipt)
+            except Exception as email_err:
+                print(f'>>> Failed to send booking confirmation email: {email_err}')
+
         return jsonify({
             'success': True,
             'client_secret': payment_intent.client_secret,

@@ -136,13 +136,28 @@ def init_postgres_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_chef_id ON users(chef_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_customer_id ON users(customer_id)')
 
-        # 2FA / email verification columns
+        # 2FA / email verification columns. Guarded so the backfill below only ever
+        # runs the ONE time these columns are first added — if it ran on every
+        # script execution, it would wrongly re-verify real users who signed up
+        # after this migration and genuinely haven't verified their email yet.
         cursor.execute('''
-            ALTER TABLE users
-                ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE,
-                ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                ADD COLUMN IF NOT EXISTS two_factor_method VARCHAR(10) CHECK (two_factor_method IN ('email', 'totp')),
-                ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(255)
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'is_verified'
+                ) THEN
+                    ALTER TABLE users
+                        ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+                        ADD COLUMN two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                        ADD COLUMN two_factor_method VARCHAR(10) CHECK (two_factor_method IN ('email', 'totp')),
+                        ADD COLUMN totp_secret VARCHAR(255);
+
+                    -- Grandfather in everyone who already had an account before
+                    -- email verification existed, so nobody gets locked out.
+                    UPDATE users SET is_verified = TRUE;
+                END IF;
+            END $$;
         ''')
 
         # Verification codes (signup email verification + login 2FA)
@@ -158,6 +173,13 @@ def init_postgres_db():
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_verification_codes_user ON verification_codes(user_id, purpose)')
+
+        # Password reset also uses verification_codes; widen the allowed purpose values.
+        cursor.execute('ALTER TABLE verification_codes DROP CONSTRAINT IF EXISTS verification_codes_purpose_check')
+        cursor.execute('''
+            ALTER TABLE verification_codes ADD CONSTRAINT verification_codes_purpose_check
+            CHECK (purpose IN ('signup', 'login_2fa', 'totp_enroll', 'password_reset'))
+        ''')
 
         # Cuisine types
         cursor.execute('''
@@ -464,6 +486,11 @@ def init_postgres_db():
                 END IF;
             END $$;
         ''')
+
+        # Notification infrastructure: tracks when a booking was actually completed,
+        # used for the "chef finished" email and the 24h rating-reminder scheduler
+        cursor.execute('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP')
+        cursor.execute('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating_reminder_sent_at TIMESTAMP')
         cursor.execute('''
             DO $$
             BEGIN

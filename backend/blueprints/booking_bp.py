@@ -1,4 +1,5 @@
 import json
+import os
 
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
@@ -6,6 +7,7 @@ from database.config import db_config
 from database.db_helper import get_db_connection, get_cursor, handle_db_error
 import math
 from services.geocoding_service import geocoding_service, get_coordinates_for_zip
+from services.email_service import send_completion_email, send_rating_reminder_email
 from datetime import date as _date
 
 # Create the blueprint
@@ -1198,24 +1200,105 @@ def calendar_for_chef(chef_id: int):
 
 @booking_bp.route('/complete/<int:booking_id>', methods=['POST'])
 def confirm_booking_completion(booking_id):
-    """Confirm a booking as completed"""
+    """Mark a booking as completed"""
 
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = get_cursor(conn, dictionary=True)
 
+        # completed_at only gets set the first time this fires, so a retry/double-tap
+        # doesn't push back the 24h rating-reminder window.
         cursor.execute('''
             UPDATE bookings
-            SET chef_review = TRUE
+            SET status = 'completed',
+                chef_review = TRUE,
+                completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
             WHERE id = %s;
         ''', (booking_id,))
 
         conn.commit()
 
+        try:
+            cursor.execute('''
+                SELECT COALESCE(cu.email, g.email) AS recipient_email,
+                       ch.first_name AS chef_first_name, ch.last_name AS chef_last_name
+                FROM bookings b
+                LEFT JOIN customers cu ON cu.id = b.customer_id
+                LEFT JOIN guests g ON g.id = b.guest_id
+                LEFT JOIN chefs ch ON ch.id = b.chef_id
+                WHERE b.id = %s
+            ''', (booking_id,))
+            info = cursor.fetchone()
+            if info and info.get('recipient_email'):
+                chef_name = f"{info.get('chef_first_name') or ''} {info.get('chef_last_name') or ''}".strip()
+                send_completion_email(info['recipient_email'], chef_name)
+        except Exception as email_err:
+            print(f'>>> Failed to send completion email: {email_err}')
+
         cursor.close()
         conn.close()
-        
-        return jsonify({'message': 'Rating successfully posted'}), 201
-    
+
+        return jsonify({'message': 'Booking marked as completed'}), 200
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@booking_bp.route('/send-rating-reminders', methods=['POST'])
+def send_rating_reminders():
+    """Machine-only endpoint (hit by a scheduled Render Cron Job) that emails a
+    one-time 'rate your chef' reminder for bookings completed 24+ hours ago that
+    haven't been rated yet. Not user-facing — gated by a shared secret header."""
+    expected_secret = os.environ.get('CRON_SECRET')
+    provided_secret = request.headers.get('X-Cron-Secret')
+    if not expected_secret or provided_secret != expected_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('''
+            SELECT b.id AS booking_id,
+                   COALESCE(cu.email, g.email) AS recipient_email,
+                   ch.first_name AS chef_first_name, ch.last_name AS chef_last_name
+            FROM bookings b
+            LEFT JOIN customers cu ON cu.id = b.customer_id
+            LEFT JOIN guests g ON g.id = b.guest_id
+            LEFT JOIN chefs ch ON ch.id = b.chef_id
+            WHERE b.status = 'completed'
+              AND b.completed_at <= NOW() - INTERVAL '24 hours'
+              AND b.customer_review = FALSE
+              AND b.rating_reminder_sent_at IS NULL
+        ''')
+        eligible = cursor.fetchall()
+
+        sent = 0
+        failed = 0
+        for booking in eligible:
+            if not booking.get('recipient_email'):
+                continue
+            chef_name = f"{booking.get('chef_first_name') or ''} {booking.get('chef_last_name') or ''}".strip()
+            try:
+                send_rating_reminder_email(booking['recipient_email'], chef_name)
+                cursor.execute(
+                    'UPDATE bookings SET rating_reminder_sent_at = CURRENT_TIMESTAMP WHERE id = %s',
+                    (booking['booking_id'],)
+                )
+                conn.commit()
+                sent += 1
+            except Exception as email_err:
+                print(f'>>> Failed to send rating reminder for booking {booking["booking_id"]}: {email_err}')
+                failed += 1
+
+        return jsonify({'eligible': len(eligible), 'sent': sent, 'failed': failed}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()

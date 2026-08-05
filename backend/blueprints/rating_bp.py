@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from database.config import db_config
 from database.db_helper import get_db_connection, get_cursor
+import psycopg2
 
 rating_bp = Blueprint('rating', __name__)
 
@@ -13,25 +14,25 @@ def add_chef_rating(chef_id):
     rating = data.get('rating')
     review = data.get('review', '')
 
-    if not all([customer_id, rating]):
+    if not all([customer_id, booking_id, rating]):
         return jsonify({'error': 'Missing required fields'}), 400
-    
+
     # For now, round to nearest integer since DB only supports INTEGER
     rating = round(rating)
-    
+
     if not (1 <= rating <= 5):
         return jsonify({'error': 'Rating must be between 1 and 5'}), 400
-    
+
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
         cursor.execute('''
-            INSERT INTO chef_rating (chef_id, customer_id, booking_id, rating, comment)
+            INSERT INTO chef_ratings (booking_id, chef_id, customer_id, rating, review_text)
             VALUES (%s, %s, %s, %s, %s)
-        ''', (chef_id, customer_id, booking_id, rating, review))
-        
-        conn.commit()
+        ''', (booking_id, chef_id, customer_id, rating, review))
 
         cursor.execute('''
             UPDATE bookings
@@ -41,13 +42,21 @@ def add_chef_rating(chef_id):
 
         conn.commit()
 
-        cursor.close()
-        conn.close()
-        
         return jsonify({'message': 'Rating successfully posted'}), 201
-    
+
+    except psycopg2.errors.UniqueViolation:
+        if conn:
+            conn.rollback()
+        return jsonify({'error': 'You have already rated this booking'}), 409
     except Exception as e:
+        if conn:
+            conn.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
     
 @rating_bp.route('/chef/<int:chef_id>', methods=['GET'])
 def get_chef_ratings(chef_id):

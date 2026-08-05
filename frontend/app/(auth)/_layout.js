@@ -46,6 +46,10 @@ export default function AuthLayout() {
             <Stack.Screen
                 name="ForgetPasswordScreen"
             />
+
+            <Stack.Screen
+                name="ResetPasswordScreen"
+            />
         </Stack>
     );
 }

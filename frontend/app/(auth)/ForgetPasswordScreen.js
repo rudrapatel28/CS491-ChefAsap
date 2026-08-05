@@ -1,135 +1,109 @@
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Text, TextInput, TouchableOpacity, View, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Button from '../components/Button';
-import Input from '../components/Input';
 import getEnvVars from '../../config';
-import { useAuth } from '../context/AuthContext';
+
+const BG = '#fefce8';
+const GREEN = '#2d6a4f';
+const TEXT = '#1a2e1a';
+
+const validateEmail = (email) => /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email);
 
 export default function ForgetPassword() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [sending, setSending] = useState(false);
   const router = useRouter();
-
   const { apiUrl } = getEnvVars();
-  const { login } = useAuth();
 
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
+    if (router.canGoBack()) { router.back(); return; }
     router.replace('/');
   };
 
-  const showAlert = (title, message, onPress = null) => {
-    const buttons = [
-      {
-        text: 'OK',
-        onPress: () => {
-          console.log('Alert pressed:', title);
-          if (onPress) onPress();
-        }
-      }
-    ];
-
-    Alert.alert(title, message, buttons, { cancelable: false });
-  };
-
-  const tryFetch = async () => {
+  const handleSendCode = async () => {
+    if (!validateEmail(email) || sending) return;
+    setSending(true);
     try {
-      const response = await fetch(`${apiUrl}/auth/signin`, {
+      const response = await fetch(`${apiUrl}/auth/forgot-password`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-      return { response, error: null };
-    } catch (error) {
-      return { response: null, error };
-    }
-  };
-
-  const handleSignin = async () => {
-    try {
-      console.log('Trying to connect to:', apiUrl);
-      console.log('Attempting signin...');
-      const result = await tryFetch();
-
-      if (!result.response) {
-        const errorMsg = result.error?.message || 'Unknown error';
-        console.error('Connection error:', errorMsg);
-        showAlert('Error', `Could not connect to server: ${errorMsg}`);
-        return;
-      }
-
-      const response = result.response;
-      console.log('Got response:', response.status);
-      const data = await response.json();
-      console.log('Response data:', data);
-
+      // Response is intentionally generic either way (doesn't reveal whether the
+      // account exists), so we always move forward to the code-entry screen.
       if (!response.ok) {
-        Alert.alert('Error', data.error || 'Sign in failed');
+        const data = await response.json().catch(() => ({}));
+        Alert.alert('Error', data.error || 'Something went wrong. Please try again.');
         return;
       }
-
-      showAlert('Success', 'Signed in successfully!');
-
-      console.log('Token:', data.token);
-      console.log('User type:', data.user_type);
-      console.log('User id:', data.user_id);
-      console.log('Profile id:', data.profile_id);
-
-      await login(data.token, data.user_type, data.user_id, data.profile_id);
-      if (data.user_type === 'customer') {
-        router.replace('/(tabs)/SearchScreen');
-      }
-      else if (data.user_type === 'chef') {
-        router.replace('/(tabs)/BookingsScreen');
-      }
-
-    } catch (error) {
-      console.error('Error in handleSignin:', error);
-      showAlert('Error', 'Network error: ' + error.message);
+      router.push({ pathname: '/ResetPasswordScreen', params: { email: email.trim().toLowerCase() } });
+    } catch (e) {
+      Alert.alert('Error', 'Network error: ' + e.message);
+    } finally {
+      setSending(false);
     }
   };
 
   return (
-    <SafeAreaView className="bg-base-100 dark:bg-base-dark-100 flex-1" edges={['top', 'bottom']}>
-    <View className="bg-base-100 dark:bg-base-dark-100 flex-1 p-5 pt-0">
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <View style={styles.inner}>
+        <Text style={styles.title}>Reset your password</Text>
+        <Text style={styles.subtitle}>
+          Enter your account email and we'll send you a code to reset your password.
+        </Text>
 
-      <Text className="text-4xl font-bold text-center mb-5 text-primary-500 dark:text-dark-500">
-        Reset Password
-      </Text>
+        <Text style={styles.inputLabel}>Email address</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="you@example.com"
+          placeholderTextColor="#aab4a8"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
 
-      <Input
-        label="Enter your email to reset your password"
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
+        <TouchableOpacity
+          style={[styles.primaryBtn, (!validateEmail(email) || sending) && styles.primaryBtnDisabled]}
+          onPress={handleSendCode}
+          disabled={!validateEmail(email) || sending}
+          activeOpacity={0.85}
+        >
+          {sending ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Send Reset Code</Text>}
+        </TouchableOpacity>
 
-      <Button
-        title="Send Reset Link"
-        style="primary"
-        disabled={!email}
-        onPress={() => alert("Reset Link sent to " + email)}
-      />
-
-      <Button
-        title="← Return to Sign In"
-        style="secondary"
-        onPress={handleBack}
-      />
-    </View>
+        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+          <Text style={styles.backBtnText}>← Return to Sign In</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: BG },
+  inner: { flex: 1, paddingHorizontal: 28, justifyContent: 'center' },
+  title: {
+    fontSize: 26, fontWeight: '700', color: TEXT,
+    letterSpacing: -0.5, marginBottom: 10, textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 14, color: '#6b8f71', textAlign: 'center',
+    marginBottom: 28, lineHeight: 20,
+  },
+  inputLabel: { fontSize: 13, fontWeight: '600', color: '#3d6b4f', marginBottom: 6 },
+  input: {
+    backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#dde8dd',
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 15, color: TEXT, marginBottom: 20,
+  },
+  primaryBtn: {
+    backgroundColor: GREEN, paddingVertical: 16, borderRadius: 14, alignItems: 'center',
+    shadowColor: GREEN, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
+  },
+  primaryBtnDisabled: { opacity: 0.6 },
+  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
+  backBtn: { paddingVertical: 16, alignItems: 'center', marginTop: 8 },
+  backBtnText: { fontSize: 14, color: '#8aab8a' },
+});

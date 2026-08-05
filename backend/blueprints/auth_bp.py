@@ -254,7 +254,7 @@ def resend_code():
 
         if not email:
             return jsonify({'error': 'Email is required'}), 400
-        if purpose not in ('signup', 'login_2fa'):
+        if purpose not in ('signup', 'login_2fa', 'password_reset'):
             return jsonify({'error': 'Invalid purpose'}), 400
 
         conn = get_db_connection()
@@ -283,6 +283,91 @@ def resend_code():
             return jsonify({'error': 'Failed to send email, please try again'}), 502
 
         return jsonify({'message': 'Code resent'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('SELECT id FROM users WHERE email = %s', (email,))
+        user = cursor.fetchone()
+
+        if user:
+            code = create_verification_code(cursor, user['id'], 'password_reset')
+            conn.commit()
+            try:
+                send_verification_email(email, code, 'password_reset')
+            except Exception as email_err:
+                print(f'>>> Failed to send password reset email: {email_err}')
+
+        # Always the same response, whether or not the email has an account —
+        # avoids letting this endpoint be used to probe which emails are registered.
+        return jsonify({'message': 'If that email has an account, a reset code was sent'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        code = (data.get('code') or '').strip()
+        new_password = data.get('new_password') or ''
+
+        if not email or not code or not new_password:
+            return jsonify({'error': 'Email, code, and new password are required'}), 400
+
+        is_valid, msg = validate_password(new_password)
+        if not is_valid:
+            return jsonify({'error': msg}), 400
+
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('SELECT id FROM users WHERE email = %s', (email,))
+        user = cursor.fetchone()
+        if not user:
+            # Same error a wrong code would give — don't reveal account existence here either.
+            return jsonify({'error': 'invalid_code'}), 400
+
+        ok, error = verify_code(cursor, user['id'], 'password_reset', code)
+        if not ok:
+            conn.commit()  # persist the attempt increment, if any
+            status = 429 if error == 'too_many_attempts' else 400
+            return jsonify({'error': error}), status
+
+        hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+        cursor.execute('UPDATE users SET password = %s WHERE id = %s', (hashed_password, user['id']))
+        conn.commit()
+
+        return jsonify({'message': 'Password reset successfully'}), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
