@@ -43,7 +43,7 @@ async function postPlannerChat({ apiUrl, token, conversationId, message }) {
 
 export default function MenuPlannerScreen() {
     const { apiUrl } = getEnvVars();
-    const { token, userId, logout } = useAuth();
+    const { token, userId, logout, isGuestBrowsing } = useAuth();
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const flatListRef = useRef();
@@ -54,6 +54,82 @@ export default function MenuPlannerScreen() {
     const [sending, setSending] = useState(false);
     const [error, setError] = useState(null);
     const [historyLoaded, setHistoryLoaded] = useState(false);
+
+    const buildGuestPlan = (prompt) => {
+        const lower = prompt.toLowerCase();
+        const guestCountMatch = lower.match(/(\d+)\s*(guest|guests|people|ppl)/);
+        const guestCount = guestCountMatch ? Number(guestCountMatch[1]) : 4;
+
+        let theme = 'ChefAsap Signature Dinner';
+        let cuisine = 'Seasonal comfort food';
+        let chefName = 'Chef Marcus Green';
+
+        if (lower.includes('italian')) {
+            theme = 'Italian Dinner Plan';
+            cuisine = 'Italian';
+            chefName = 'Chef Lucia Romano';
+        } else if (lower.includes('vegan')) {
+            theme = 'Vegan Celebration Menu';
+            cuisine = 'Vegan';
+            chefName = 'Chef Nia Brooks';
+        } else if (lower.includes('brunch')) {
+            theme = 'Brunch Event Plan';
+            cuisine = 'Brunch';
+            chefName = 'Chef Maya Carter';
+        }
+
+        const perPerson = cuisine === 'Vegan' ? 28 : cuisine === 'Italian' ? 34 : 31;
+        const total = Number((guestCount * perPerson).toFixed(2));
+
+        return {
+            conversation_id: conversationId || 'guest-demo-conversation',
+            role: 'assistant',
+            content: `I can help you plan that as a guest. Here is a demo order for ${guestCount} guests based on your request.`,
+            plan: {
+                menu: [
+                    {
+                        course: 'Starter',
+                        dishes: [
+                            { name: cuisine === 'Italian' ? 'Tomato Basil Crostini' : 'Crisp Salad with Citrus Dressing' },
+                        ],
+                    },
+                    {
+                        course: 'Main',
+                        dishes: [
+                            { name: cuisine === 'Italian' ? 'Chicken Parmesan Pasta' : cuisine === 'Vegan' ? 'Roasted Vegetable Grain Bowl' : 'Jerk Chicken with Rice' },
+                        ],
+                    },
+                    {
+                        course: 'Dessert',
+                        dishes: [
+                            { name: cuisine === 'Italian' ? 'Tiramisu Cups' : cuisine === 'Vegan' ? 'Coconut Mango Pudding' : 'Mini Fruit Tartlets' },
+                        ],
+                    },
+                ],
+                ingredients: [
+                    { name: 'Fresh herbs', quantity: '2 bunches' },
+                    { name: 'Seasonal vegetables', quantity: '6-8 cups' },
+                    { name: 'Dessert garnish', quantity: '1 set' },
+                ],
+                estimated_cost: {
+                    total,
+                    per_person: perPerson,
+                },
+                chefs: [
+                    {
+                        chef_id: 1,
+                        full_name: chefName,
+                        first_name: chefName.split(' ')[1] || 'Chef',
+                        last_name: chefName.split(' ').slice(2).join(' ') || '',
+                        cuisines: [cuisine],
+                        rating: { average_rating: 4.8, total_reviews: 18 },
+                        match_reason: 'Good demo match for your guest order.',
+                    },
+                ],
+                notes: `Guest demo mode is active. This plan is local-only and can be used to preview an order before creating an account.`,
+            },
+        };
+    };
 
     // Restore the last saved conversation for this user on mount, so leaving
     // and re-entering the screen doesn't wipe the chat.
@@ -124,6 +200,22 @@ export default function MenuPlannerScreen() {
         setMessages(prev => [...prev, userMsg]);
 
         try {
+            if (isGuestBrowsing || !token) {
+                const guestResponse = buildGuestPlan(trimmed);
+                setConversationId(guestResponse.conversation_id);
+
+                const assistantMsg = {
+                    id: `a-${Date.now()}`,
+                    role: 'assistant',
+                    content: guestResponse.content,
+                    plan: guestResponse.plan,
+                };
+
+                setMessages(prev => [...prev, assistantMsg]);
+                setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+                return;
+            }
+
             const data = await postPlannerChat({ apiUrl, token, conversationId, message: trimmed });
 
             if (!conversationId && data.conversation_id) {
