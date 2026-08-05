@@ -1219,3 +1219,100 @@ def confirm_booking_completion(booking_id):
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+#cancel booking logic
+@booking_bp.route('/cancel/<int:booking_id>', methods=['POST'])
+def cancel_booking(booking_id):
+    """Cancel a booking"""
+    try:
+        data = request.get_json()
+        payment_method_id = data.get('payment_method_id')
+        
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('''
+            SELECT b.booking_date, b.booking_time, b.total_cost, b.status, c.stripe_customer_id
+            FROM bookings b
+            JOIN customers c ON b.customer_id = c.id
+            WHERE b.id = %s
+        ''', (booking_id,))
+
+        booking = cursor.fetchone()
+        if not booking:
+            return jsonify({'error': 'Booking not found'}), 404
+
+        if booking['status'] in ('cancelled', 'completed'):
+            return jsonify({'error': 'Booking cannot be cancelled'}), 400
+
+        booking_datetime = datetime.combine(booking['booking_date'], booking['booking_time'])
+        hours_until = (booking_datetime - datetime.now()).total_seconds() / 3600
+        cancelation_fee = None
+
+        if hours_until < 24 and booking['total_cost'] and booking['stripe_customer_id'] and payment_method_id:
+            import stripe as stripe_lib
+            stripe_lib.api_key = __import__('os').environ.get('STRIPE_SECRET_KEY')
+            # hardcoded 50% fee for cancellations within 24 hours 
+            fee_cents = int(float(booking['total_cost']) * 0.50 * 100) 
+            stripe_lib.PaymentIntent.create(
+                amount=fee_cents,
+                currency='usd',
+                customer=booking['stripe_customer_id'],
+                payment_method=payment_method_id,
+                confirm=True,
+                automatic_payment_methods={'enabled': True, 'allow_redirects': 'never'},
+                description=f'Cancellation fee for booking {booking_id}',
+            )
+            cancelation_fee = fee_cents / 100.0
+
+        cursor.execute('''
+            UPDATE bookings SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (booking_id,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Booking cancelled successfully',
+            'cancelation_fee': cancelation_fee,
+            'within_24_hours': hours_until < 24
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- Booking deletion logic: permanently deletes cancelled, declined, or past pending bookings ---
+@booking_bp.route('/delete/<int:booking_id>', methods=['DELETE'])
+def delete_booking(booking_id):
+    try:
+        conn = get_db_connection()
+        cursor = get_cursor(conn, dictionary=True)
+
+        cursor.execute('SELECT status, booking_date FROM bookings WHERE id = %s', (booking_id,))
+        booking = cursor.fetchone()
+
+        if not booking:
+            return jsonify({'error': 'Booking not found'}), 404
+
+        status = booking['status']
+        booking_date = booking['booking_date']
+        today = datetime.now().date()
+
+        is_past_pending = status == 'pending' and booking_date < today
+        is_deletable = status in ('cancelled', 'declined') or is_past_pending
+
+        if not is_deletable:
+            return jsonify({'error': 'Booking cannot be deleted'}), 400
+
+        cursor.execute('DELETE FROM bookings WHERE id = %s', (booking_id,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({'success': True, 'message': 'Booking deleted successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+# --- End booking deletion logic ---
