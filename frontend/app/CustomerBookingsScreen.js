@@ -38,6 +38,7 @@ const STATUS_BUTTONS = [
     { label: 'Accepted',  value: 'accepted' },
     { label: 'Completed', value: 'completed' },
     { label: 'Declined',  value: 'declined' },
+    { label: 'Cancelled', value: 'cancelled' },
 ];
 
 // Normalize status to lowercase and map synonyms
@@ -49,7 +50,7 @@ const normalizeStatus = (raw) => {
 };
 
 export default function CustomerBookingsScreen() {
-    const { token, profileId, userType } = useAuth();
+    const { token, profileId, userType, userId } = useAuth();
     const { apiUrl } = getEnvVars();
     const router = useRouter();
     const insets = useSafeAreaInsets();
@@ -142,6 +143,89 @@ export default function CustomerBookingsScreen() {
             setSubmittingReview(false);
         }
     };
+
+    const handleCancelBooking = async (booking) => {
+        const [datePart] = booking.booking_date.split('T');
+        const bookingDate = new Date(`${datePart}T${booking.booking_time}`);
+        const hoursUntil = (bookingDate - new Date()) / (1000 * 60 * 60);
+        const withinWindow = hoursUntil < 24;
+        // Calculate cancellation fee if within 24 hours. 0.50 is the % in decimal and is hardcoded
+        const fee = withinWindow ? (Number(booking.total_cost) * 0.50).toFixed(2) : null;
+
+        const message = withinWindow
+            ? `This booking is within 24 hours. A cancellation fee of $${fee} (50% of total) will be charged. Proceed?`
+            : 'Are you sure you want to cancel this booking? No fee will be charged.';
+    Alert.alert('Cancel Booking', message,[
+        { text: 'Keep Booking', style: 'cancel' },
+        {
+            text: 'Cancel Booking', style: 'destructive',
+            onPress: async () => {
+                try {
+                    const pmRes = await fetch(`${apiUrl}/stripe-payment/payment-methods?customer_id=${userId}`, {
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    });
+                    const pmData = await pmRes.json();
+                    const defaultPm = pmData.payment_methods?.find(pm => pm.is_default);
+
+                    const response = await fetch(`${apiUrl}/booking/cancel/${booking.booking_id}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ payment_method_id: defaultPm?.id }),
+                    });
+                    const data = await response.json();
+                    if (response.ok){
+                        const msg = data.cancellation_fee 
+                        ? `Booking cancelled. A fee of $${data.cancellation_fee.toFixed(2)} was charged.` 
+                        : 'Booking cancelled successfully.';
+                        Alert.alert('Cancelled', msg);
+                        fetchBookings();
+                    } else {
+                        Alert.alert('Error', data.error || 'Failed to cancel booking');
+                    }
+                }
+                catch{
+                    Alert.alert('Error', 'Network error. Could not cancel booking.');
+                }
+            }
+        }
+    ])
+    }
+
+    // --- Booking deletion logic: removes cancelled, declined, or past pending bookings permanently ---
+    const handleDeleteBooking = async (booking) => {
+        const isPastPending = booking.status === 'pending' && new Date(booking.booking_date) < new Date();
+
+        Alert.alert(
+            'Delete Booking',
+            isPastPending
+                ? 'This pending booking has passed. Delete it from your list?'
+                : 'Permanently delete this booking from your list?',
+            [
+                { text: 'Keep', style: 'cancel' },
+                {
+                    text: 'Delete', style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            const response = await fetch(`${apiUrl}/booking/delete/${booking.booking_id}`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            });
+                            const data = await response.json();
+                            if (response.ok) {
+                                Alert.alert('Deleted', 'Booking removed from your list.');
+                                fetchBookings();
+                            } else {
+                                Alert.alert('Error', data.error || 'Failed to delete booking');
+                            }
+                        } catch {
+                            Alert.alert('Error', 'Network error. Could not delete booking.');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+    // --- End booking deletion logic ---
 
     const filteredBookings = selectedStatus === 'all'
         ? bookings
@@ -311,6 +395,27 @@ export default function CustomerBookingsScreen() {
                                             <Octicons name="x-circle" size={13} color="#991b1b" />
                                             <Text style={[s.statusMsgText, { color: '#991b1b' }]}>This booking was cancelled.</Text>
                                         </View>
+                                    )}
+                                    {/* Cancel button*/}
+                                    {(booking.status === 'pending' || booking.status === 'accepted') && new Date(`${booking.booking_date}T${booking.booking_time}`) > new Date() && (
+                                        <TouchableOpacity style={[s.reviewBtn, { borderColor: '#991b1b', backgroundColor: '#fee2e2', marginTop: 10 }]}
+                                            onPress={() => handleCancelBooking(booking)} activeOpacity={0.85}>
+                                            <Octicons name="x-circle" size={15} color="#991b1b" style={{ marginRight: 7 }} />
+                                            <Text style={[s.reviewBtnText, { color: '#991b1b' }]}>Cancel Booking</Text>
+                                        </TouchableOpacity>         
+                                    )}
+
+                                    {/* Delete button: shows on cancelled, declined, or past pending bookings */}
+                                    {(booking.status === 'cancelled' || booking.status === 'declined' ||
+                                        (booking.status === 'pending' && new Date(booking.booking_date) < new Date())) && (
+                                        <TouchableOpacity
+                                            style={[s.reviewBtn, { borderColor: '#6b7280', backgroundColor: '#f3f4f6', marginTop: 10 }]}
+                                            onPress={() => handleDeleteBooking(booking)}
+                                            activeOpacity={0.85}
+                                        >
+                                            <Octicons name="trash" size={15} color="#6b7280" style={{ marginRight: 7 }} />
+                                            <Text style={[s.reviewBtnText, { color: '#6b7280' }]}>Delete Booking</Text>
+                                        </TouchableOpacity>
                                     )}
 
                                     {/* Review button */}
